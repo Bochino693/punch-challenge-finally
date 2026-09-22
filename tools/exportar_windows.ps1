@@ -84,6 +84,18 @@ $godotExe = Encontrar-Godot $Godot
 if (-not $godotExe) {
     throw "Godot nao encontrado. Passe -Godot C:\caminho\Godot_v4.6-stable_win64.exe ou defina PUNCH_GODOT."
 }
+# PREFERIR A VARIANTE .console.exe, QUANDO ELA EXISTE.
+#
+# O ZIP do Godot para Windows traz dois binarios: o normal, de subsistema
+# grafico, e um `.console.exe`, que e um lanchador de CONSOLE. Para uso
+# em linha de comando o segundo e o certo: ele espera, devolve codigo de
+# saida e entrega a saida do Godot na ordem em que ela acontece, em vez
+# de despeja-la depois que o prompt ja voltou.
+$console = [System.IO.Path]::ChangeExtension($godotExe, $null) + ".console.exe"
+if (Test-Path -LiteralPath $console) {
+    $godotExe = $console
+    Write-Host "    (usando a variante de console)"
+}
 Write-Host "    $godotExe"
 
 # --------------------------------------------- conferencia antes de exportar
@@ -103,11 +115,51 @@ if ($sh -and (Test-Path -LiteralPath $conferidor)) {
 }
 
 # ---------------------------------------------------------------- exportar
+#
+# O GODOT NAO PODE SER CHAMADO COM `&`. AQUI ESTAVA O DEFEITO.
+#
+# `Godot_v4.6.1-stable_win64.exe` e um binario de SUBSISTEMA GRAFICO,
+# mesmo rodando com --headless. O PowerShell NAO ESPERA um programa de
+# GUI terminar quando ele e chamado com `&`: dispara e segue na hora.
+#
+# O resultado era exatamente o que se viu na tela: a linha seguinte
+# comparava `$LASTEXITCODE`, que ainda estava VAZIO (nenhum programa de
+# console havia rodado), `'' -ne 0` dava verdadeiro, e o script morria
+# com "A exportacao do Godot falhou (codigo )" -- sem numero nenhum
+# dentro do parenteses, que e a assinatura do defeito. Segundos depois o
+# Godot terminava de exportar e despejava o log DEPOIS da mensagem de
+# erro, no prompt ja devolvido.
+#
+# E o estrago nao era so o susto: como o script morria aqui, NADA do que
+# vem depois acontecia -- nem a copia das DLLs, nem o vcruntime, nem a
+# conferencia de arquitetura, nem o ZIP. A pasta ficava com o que o
+# Godot tivesse escrito e mais nada, que e a origem de "levei para o
+# outro PC e a camera nao funciona".
+#
+# `Start-Process -Wait` espera qualquer subsistema, e `-PassThru` da
+# acesso ao codigo de saida de verdade.
+function Invocar-Godot([string[]]$argumentos) {
+    # Os argumentos vao aspeados um a um: o caminho do projeto quase
+    # sempre tem espaco (`C:\Users\LAZER GAMES\...`) e o nome do preset
+    # tem espaco sempre ("Windows Desktop").
+    # O TrimEnd e contra um caminho terminado em barra: "C:\pasta\" faria
+    # a barra escapar a propria aspa e engolir o argumento seguinte.
+    $aspeados = $argumentos | ForEach-Object { '"' + $_.TrimEnd('\') + '"' }
+    $p = Start-Process -FilePath $godotExe -ArgumentList $aspeados `
+        -NoNewWindow -Wait -PassThru
+    return $p.ExitCode
+}
+
 Passo "exportando com o preset '$Preset'"
 if (Test-Path $saida) { Remove-Item -Recurse -Force $saida }
 New-Item -ItemType Directory -Force -Path $saida | Out-Null
-& $godotExe --headless --path $raiz --export-release $Preset
-if ($LASTEXITCODE -ne 0) { throw "A exportacao do Godot falhou (codigo $LASTEXITCODE)." }
+$codigo = Invocar-Godot @("--headless", "--path", $raiz, "--export-release", $Preset)
+if ($codigo -ne 0) {
+    throw "A exportacao do Godot falhou (codigo $codigo). Abra o project.godot no editor uma vez e confira os modelos de exportacao."
+}
+if (-not (Test-Path -LiteralPath (Join-Path $saida "PunchChallenge.exe"))) {
+    throw "O Godot terminou sem erro mas nao escreveu PunchChallenge.exe. Confira Editor > Gerenciar modelos de exportacao."
+}
 
 # ------------------------------------------------------- bibliotecas nativas
 # Nao depende do exportador adivinhar onde por as bibliotecas. Copia cada
@@ -240,6 +292,13 @@ INVENTARIO DESTE PACOTE (SHA256 abreviado)
 $($inventario -join "`r`n")
 "@
 Set-Content -LiteralPath (Join-Path $saida "LEIA-ANTES-DE-EXECUTAR.txt") -Value $leia -Encoding UTF8
+
+Passo "o que ficou na pasta"
+Get-ChildItem -Path $saida -Recurse -File |
+    Sort-Object FullName |
+    ForEach-Object {
+        Write-Host ("    {0,10:N0}  {1}" -f $_.Length, $_.FullName.Substring($saida.Length).TrimStart('\'))
+    }
 
 if (-not $SemZip) {
     Passo "fechando o ZIP"

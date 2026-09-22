@@ -115,17 +115,23 @@ COMO LEVAR PARA OUTRO PC
 1. Abra o projeto no Godot 4.6.
 2. Exporte com o preset Windows Desktop x86_64.
 3. Copie a PASTA EXPORTADA INTEIRA, e nao apenas o arquivo EXE.
-   Confira que estes arquivos foram junto, ao lado do .exe:
-     libcameraserver-extension.windows.dll   (camera)
-     gdserial.dll                            (Arduino)
-   Sem o primeiro nao ha camera; sem o segundo nao ha sensor.
+   As DLLs NAO ficam soltas ao lado do .exe: elas ficam em SUBPASTAS,
+   no mesmo caminho que o .gdextension declara a partir de res://. E
+   obrigatorio preservar essa estrutura -- uma DLL correta na pasta
+   errada e igual a uma DLL ausente.
+
+     PunchChallenge.exe
+     addons\CameraServerExtension\x86_64\libcameraserver-extension.windows.dll
+     addons\gdserial\bin\windows-x86_64\gdserial.dll
+
+   Sem a primeira nao ha camera; sem a segunda nao ha sensor.
 3b. Nao e preciso instalar o Visual C++ Redistributable: exportando por
     tools/exportar_windows.ps1, o vcruntime140.dll ja vai dentro da pasta.
 4. Conecte a camera e o Arduino antes de abrir o jogo.
 
-ARQUIVOS NATIVOS IMPORTANTES
-- Camera: libcameraserver-extension.windows.dll
-- Arduino: gdserial.dll
+ARQUIVOS NATIVOS IMPORTANTES (caminho relativo ao executavel)
+- Camera:  addons\CameraServerExtension\x86_64\libcameraserver-extension.windows.dll
+- Arduino: addons\gdserial\bin\windows-x86_64\gdserial.dll
 
 ARDUINO
 Os fontes do firmware, o protocolo serial, os scripts serial e o addon
