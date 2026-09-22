@@ -46,6 +46,37 @@ extends SubViewport
 const TAMANHO_CHEIO := Vector2i(688, 770)
 const TAMANHO_MAGRO := Vector2i(482, 539)
 
+## A JANELA NÍTIDA: O DOBRO, REDUZIDO NA HORA DE DESENHAR.
+##
+## Por que isto melhora a definição de TUDO, e não só de um detalhe.
+## A arena não tem antisserrilhado nenhum (`msaa_3d` desligado, e o
+## recorte do lutador é por limiar de alfa, que é decisão de tudo-ou-
+## nada: a silhueta sai em degraus de um bit). Num quadro de 688 × 770
+## esses degraus têm o tamanho de um pixel e se veem — é a "resolução
+## fraca": não é falta de pixels na tela, é falta de amostras por pixel.
+##
+## Desenhar a 1376 × 1540 e reduzir para o buraco de 688 × 770 é uma
+## redução de exatamente 2:1, então cada pixel final é a MÉDIA DE
+## QUATRO amostras. Isso antisserrilha o ringue, as cordas, as faíscas
+## e — o que mais importa aqui — o contorno do lutador, sem precisar de
+## MSAA nem de recurso que a TV Box possa não ter.
+##
+## Custa quatro vezes mais pixels. A cena é barata (uma malha, três
+## luzes sem sombra, um sprite), mas isto não é promessa: é por isso
+## que existe a escada em `_ajustar_tamanho`, e é o vigia de desempenho
+## quem decide em qual degrau a máquina fica.
+const TAMANHO_NITIDO := Vector2i(1376, 1540)
+
+## A ESCADA, COM HISTERESE. Subir e descer no mesmo número faria a
+## janela piscar entre dois tamanhos toda vez que a qualidade
+## encostasse no limiar — e trocar o tamanho de um `SubViewport`
+## realoca a textura, que é justamente o que não pode acontecer a cada
+## quadro.
+const SOBE_PARA_NITIDO := 0.95
+const DESCE_DO_NITIDO := 0.85
+const SOBE_PARA_CHEIO := 0.60
+const DESCE_DO_CHEIO := 0.50
+
 ## O ENQUADRAMENTO DA CÂMERA, EM DUAS CONSTANTES (ver `_calcular_enquadramento`).
 ##
 ## Quanto da altura da janela o lutador EM PÉ ocupa. Em 0,79 sobram uns
@@ -88,10 +119,13 @@ const ALTURA_DA_LONA := 0.015
 ## um corte reto atravessando a bota, que não some e não se explica: a
 ## "linha invisível".
 ##
-## Dois pixels da folha (uns nove milímetros no ringue, três pixels na
-## janela da arena) separam as duas de vez. É pouco o bastante para a
-## sombra de contato fechar o vão, e a bota fica inteira.
-const FOLGA_DA_SOLA_PX := 2.0
+## AGORA ELA É SÓ ESTÉTICA, e por isso encolheu de dois pixels para um.
+## Quem impede o corte passou a ser `no_depth_test` no desenho do
+## lutador (ver `Lutador3D.montar`): nenhum plano tem mais poder de
+## cortá-lo, então a folga não precisa mais ser uma margem de
+## segurança. Um pixel basta para a sombra de contato caber embaixo da
+## sola, e um pixel não se vê.
+const FOLGA_DA_SOLA_PX := 1.0
 
 ## A MANCHA DE CONTATO FICA ABAIXO DA SOLA, E ISSO É UMA CORREÇÃO.
 ##
@@ -104,7 +138,7 @@ const FOLGA_DA_SOLA_PX := 2.0
 ## Logo acima do tapete e logo ABAIXO da sola, ela não cruza desenho
 ## nenhum: aparece só no tapete, em volta e à frente dos pés, que é onde
 ## uma sombra de contato mora.
-const ALTURA_DA_SOMBRA := ALTURA_DA_LONA + 0.002
+const ALTURA_DA_SOMBRA := ALTURA_DA_LONA + 0.001
 
 ## A altura, no mundo, em que a BORDA DE BAIXO da bota encosta.
 ##
@@ -152,7 +186,6 @@ var _clarao := 0.0
 var _empurrao := 0.0
 var _publico := 0.0
 var _ativa := false
-var _magra := false
 
 ## 1.0 = tudo; abaixo de 0,55 a janela encolhe, preservando a taxa de quadros.
 var qualidade := 1.0
@@ -166,6 +199,7 @@ func _ready() -> void:
 	use_taa = false
 	positional_shadow_atlas_size = 0
 	size = TAMANHO_CHEIO
+	_degrau = 1
 	render_target_update_mode = SubViewport.UPDATE_DISABLED
 	_montar_mundo()
 
@@ -681,12 +715,29 @@ func avancar(delta: float) -> void:
 	render_target_update_mode = SubViewport.UPDATE_ONCE
 	_ajustar_tamanho()
 
+## Em qual degrau a janela está: 0 magra, 1 cheia, 2 nítida.
+var _degrau := 1
+
 func _ajustar_tamanho() -> void:
-	var magra := qualidade < 0.55
-	if magra == _magra:
+	var alvo := _degrau
+	# Descer é urgente (a máquina já está sofrendo); subir é opcional.
+	if _degrau == 2 and qualidade < DESCE_DO_NITIDO:
+		alvo = 1
+	elif _degrau <= 1 and qualidade >= SOBE_PARA_NITIDO:
+		alvo = 2
+	if alvo == 1 and qualidade < DESCE_DO_CHEIO:
+		alvo = 0
+	elif alvo == 0 and qualidade >= SOBE_PARA_CHEIO:
+		alvo = 1
+	if alvo == _degrau:
 		return
-	_magra = magra
-	size = TAMANHO_MAGRO if magra else TAMANHO_CHEIO
+	_degrau = alvo
+	# `match` e não uma lista indexada: a lista seria construída a cada
+	# quadro, e isto roda em `avancar`.
+	match _degrau:
+		0: size = TAMANHO_MAGRO
+		2: size = TAMANHO_NITIDO
+		_: size = TAMANHO_CHEIO
 
 ## ------------------------------------------------------- o enquadramento
 ##
