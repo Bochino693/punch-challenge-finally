@@ -84,6 +84,18 @@ $godotExe = Encontrar-Godot $Godot
 if (-not $godotExe) {
     throw "Godot nao encontrado. Passe -Godot C:\caminho\Godot_v4.6-stable_win64.exe ou defina PUNCH_GODOT."
 }
+# PREFERIR A VARIANTE .console.exe, QUANDO ELA EXISTE.
+#
+# O ZIP do Godot para Windows traz dois binarios: o normal, de subsistema
+# grafico, e um `.console.exe`, que e um lanchador de CONSOLE. Para uso
+# em linha de comando o segundo e o certo: ele espera, devolve codigo de
+# saida e entrega a saida do Godot na ordem em que ela acontece, em vez
+# de despeja-la depois que o prompt ja voltou.
+$console = [System.IO.Path]::ChangeExtension($godotExe, $null) + ".console.exe"
+if (Test-Path -LiteralPath $console) {
+    $godotExe = $console
+    Write-Host "    (usando a variante de console)"
+}
 Write-Host "    $godotExe"
 
 # --------------------------------------------- conferencia antes de exportar
@@ -280,6 +292,13 @@ INVENTARIO DESTE PACOTE (SHA256 abreviado)
 $($inventario -join "`r`n")
 "@
 Set-Content -LiteralPath (Join-Path $saida "LEIA-ANTES-DE-EXECUTAR.txt") -Value $leia -Encoding UTF8
+
+Passo "o que ficou na pasta"
+Get-ChildItem -Path $saida -Recurse -File |
+    Sort-Object FullName |
+    ForEach-Object {
+        Write-Host ("    {0,10:N0}  {1}" -f $_.Length, $_.FullName.Substring($saida.Length).TrimStart('\'))
+    }
 
 if (-not $SemZip) {
     Passo "fechando o ZIP"
