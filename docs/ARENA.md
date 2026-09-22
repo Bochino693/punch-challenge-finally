@@ -176,12 +176,34 @@ desenhado na frente do plano do desenho, o que aparece não é pé
 enterrado, é bota decepada.
 
 Agora o chão é uma constante só — `Arena3D.ALTURA_DA_LONA` —, o miolo é
-construído a partir dela, o lutador é pousado em
-`PISO_DO_LUTADOR = ALTURA_DA_LONA + FOLGA_DA_SOLA` e a sombra de contato
-sai da mesma medida. A folga de 4 mm (um pixel da folha) existe para as
-duas superfícies não ficarem no mesmo plano: coplanares, qual delas
-aparece vira sorteio do teste de profundidade, e o corte volta —
-intermitente, que é pior.
+construído a partir dela e o lutador é pousado em
+`Arena3D.piso_do_lutador()`.
+
+**E a sola é a BORDA DE BAIXO da linha 418, não a linha 418.** Esta foi
+a última fatia, e é um erro de um pixel. Uma linha de textura ocupa um
+intervalo: num sprite centrado, a linha `r` vai de `v = r` a
+`v = r + 1`. Pondo `v = 418` no chão, a última linha com tinta da bota
+ficava *a cavaleiro* do plano do tapete — metade acima, metade abaixo —
+e o tapete, desenhado na frente, cortava a bota ao meio. Quatro
+milímetros. É a "linha invisível". `Lutador3D.SOLA_NO_QUADRO_PX` é a
+borda certa.
+
+**A folga é medida em pixels da folha, não em metros.** Dois
+(`FOLGA_DA_SOLA_PX`), porque é em pixel que o defeito aparece: a menos
+de um, a borda da bota e o topo do tapete caem na mesma linha de pixel
+da tela e qual delas ganha vira sorteio do teste de profundidade — o
+mesmo corte, só que intermitente, que é pior de diagnosticar. Mais de
+três e o lutador começa a flutuar.
+
+**A sombra de contato ficava ACIMA da bota, e era um segundo corte.**
+Ela estava em `y = 0,022`. Uma mancha é um plano horizontal: posta
+acima da sola, ela atravessa o desenho e escurece de uma vez tudo o que
+fica abaixo da altura dela — outra linha reta na bota, do mesmo tipo da
+primeira, e posta ali justamente para esconder a primeira. Agora ela
+mora em `ALTURA_DA_SOMBRA`, entre o tapete e a sola, e **some no
+tombo**: um corpo que desce 34 cm passa a ser atravessado por ela, e um
+corpo caído já está no tapete — não precisa de mancha para dizer que
+encostou.
 
 **A janela 3D tem o tamanho exato do buraco da moldura.** Ela era
 640 × 717 e era desenhada num buraco de 688 × 770: a proporção batia,

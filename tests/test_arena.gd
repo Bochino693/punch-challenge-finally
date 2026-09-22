@@ -153,20 +153,53 @@ func _test_a_janela_tem_a_proporcao_do_buraco() -> void:
 ## construído a partir dela e o lutador é pousado nela com um fio de
 ## folga. Este teste cobra que os três continuem concordando.
 func _test_a_bota_pousa_em_cima_do_tapete() -> void:
-	_ok(Arena3D.PISO_DO_LUTADOR > Arena3D.ALTURA_DA_LONA,
+	var piso := Arena3D.piso_do_lutador()
+	_ok(piso > Arena3D.ALTURA_DA_LONA,
 		"a sola tem de ficar ACIMA do tapete, senão o tapete come a bota")
-	# A folga existe para não deixar as duas superfícies no mesmo plano,
-	# mas não pode virar um lutador flutuando: um pixel da folha basta.
-	_ok(Arena3D.FOLGA_DA_SOLA <= Lutador3D.PIXEL_NO_MUNDO * 2.0,
-		"a folga da sola não pode passar de dois pixels da folha")
+	# A FOLGA TEM DE VALER MAIS DE UM PIXEL DA FOLHA.
+	#
+	# Menos do que isso e a borda de baixo da bota e o topo do tapete
+	# caem na mesma linha de pixel da tela — qual das duas aparece vira
+	# sorteio do teste de profundidade, e o resultado é o corte reto que
+	# atravessa a bota. Mais do que dois e o lutador começa a flutuar.
+	var folga := piso - Arena3D.ALTURA_DA_LONA
+	_ok(folga > Lutador3D.PIXEL_NO_MUNDO * 1.5,
+		"a folga da sola tem de passar de um pixel e meio da folha")
+	_ok(folga <= Lutador3D.PIXEL_NO_MUNDO * 3.0,
+		"a folga da sola não pode passar de três pixels da folha")
+	# A MANCHA DE CONTATO FICA ENTRE O TAPETE E A SOLA.
+	#
+	# Ela é um plano horizontal: acima da sola, ATRAVESSA o desenho e
+	# escurece tudo o que fica abaixo dela — um segundo corte na bota,
+	# pelo mesmo motivo do primeiro.
+	_ok(Arena3D.ALTURA_DA_SOMBRA > Arena3D.ALTURA_DA_LONA,
+		"a mancha tem de ficar acima do tapete para aparecer")
+	_ok(Arena3D.ALTURA_DA_SOMBRA < piso,
+		"a mancha tem de ficar ABAIXO da sola, senão ela corta a bota")
 	var arena := Arena3D.new()
 	get_root().add_child(arena)
 	_ok(arena.instalar(), "a arena tem de conseguir montar o lutador")
+	# E NO TOMBO A MANCHA TEM DE SUMIR. O corpo desce 34 cm; o plano da
+	# mancha, que ficava abaixo dele, passa a atravessá-lo e escurece
+	# tudo o que fica sob a altura dela numa linha reta. Um corpo caído
+	# já está no tapete e não precisa de mancha para dizer que encostou.
 	if arena.lutador != null:
-		_perto(arena.lutador.position.y, Arena3D.PISO_DO_LUTADOR, 0.0001,
+		arena.ligar(true)
+		arena.lutador.queda = 1.0
+		arena.avancar(1.0 / 60.0)
+		var mancha := arena.get_node_or_null("Mundo/SombraDeContato") as MeshInstance3D
+		_ok(mancha == null or not mancha.visible,
+			"a mancha de contato tem de sumir quando o lutador vai à lona")
+		arena.lutador.preparar()
+		arena.avancar(1.0 / 60.0)
+		_ok(mancha != null and mancha.visible,
+			"e tem de voltar quando o lutador se levanta")
+		arena.ligar(false)
+	if arena.lutador != null:
+		_perto(arena.lutador.position.y, piso, 0.0001,
 			"o lutador tem de ser pousado no piso do ringue")
-		# E a linha mais baixa da bota — o y = 0 do lutador — tem de
-		# sobrar acima do tapete depois de somada a posição do nó.
+		# E a borda de baixo da bota — o y = 0 do lutador — tem de sobrar
+		# acima do tapete depois de somada a posição do nó.
 		_ok(arena.lutador.position.y + arena.lutador.pe_mais_baixo()
 				> Arena3D.ALTURA_DA_LONA,
 			"a sola tem de sobrar acima do tapete")
