@@ -98,19 +98,33 @@ func _test_o_lutador_mede_o_que_promete() -> void:
 	# única forma de o teste pegar um `montar` que pendure o sprite na
 	# altura errada apesar de as constantes estarem certas.
 	var meio := Lutador3D.ALTURA_DA_FOLHA * 0.5
-	# A altura, no mundo, de uma linha da folha (0 = topo da célula).
-	var linha := func(px: float) -> float:
+	# UMA LINHA DA FOLHA OCUPA UM INTERVALO, E NÃO UM PONTO.
+	#
+	# Num sprite centrado, a linha `r` vai de `v = r` (borda de cima) a
+	# `v = r + 1` (borda de baixo). Este teste já mediu a "altura da
+	# linha 418" e passou enquanto a borda de baixo dessa mesma linha
+	# ficava meio pixel dentro do tapete — que era o corte reto no meio
+	# da bota. Agora as duas bordas têm nome.
+	var topo_da_linha := func(px: float) -> float:
 		return figura.position.y + figura.pixel_size * (meio - px)
+	var base_da_linha := func(px: float) -> float:
+		return figura.position.y + figura.pixel_size * (meio - px - 1.0)
 
-	_perto(linha.call(Lutador3D.TOPO_DA_CABECA_PX) - linha.call(Lutador3D.SOLA_DO_PE_PX),
-		Lutador3D.ALTURA_DA_FIGURA, 0.01,
+	_perto(
+		topo_da_linha.call(Lutador3D.TOPO_DA_CABECA_PX)
+			- base_da_linha.call(Lutador3D.SOLA_DO_PE_PX),
+		Lutador3D.ALTURA_DA_FIGURA, 0.002,
 		"do topo da cabeça à sola o lutador tem de medir ALTURA_DA_FIGURA")
-	_perto(linha.call(Lutador3D.SOLA_DO_PE_PX), 0.0, 0.002,
-		"a sola do pé da frente tem de pousar na lona (y = 0)")
+	_perto(base_da_linha.call(Lutador3D.SOLA_DO_PE_PX), 0.0, 0.0005,
+		"a BORDA DE BAIXO da última linha da bota tem de pousar em y = 0")
+	# E nenhuma tinta pode sobrar abaixo disso: se a última linha com
+	# tinta ficasse a cavaleiro do zero, o tapete a cortaria ao meio.
+	_ok(topo_da_linha.call(Lutador3D.SOLA_DO_PE_PX) > 0.0,
+		"a última linha com tinta tem de ficar inteira acima do chão")
 	# E a borda de baixo do quadro — onde a perna cortada termina — tem
-	# de ficar ABAIXO da lona, senão o corte aparece no ar em vez de
+	# de ficar ABAIXO do chão, senão o corte aparece no ar em vez de
 	# sumir dentro do tapete.
-	_ok(linha.call(Lutador3D.ALTURA_DA_FOLHA) < 0.0,
+	_ok(base_da_linha.call(Lutador3D.ALTURA_DA_FOLHA - 1.0) < 0.0,
 		"a borda de baixo do quadro tem de afundar na lona para o corte não aparecer")
 	l.free()
 

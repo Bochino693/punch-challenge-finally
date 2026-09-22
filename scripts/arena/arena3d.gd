@@ -78,13 +78,40 @@ const CAMERA_ACIMA_DA_MIRA := 0.21
 ## Agora o miolo é construído a partir desta constante e o lutador é
 ## pousado nela, então os dois não têm como divergir de novo.
 const ALTURA_DA_LONA := 0.015
-## Um fio de folga entre a sola e o tapete: sem ela as duas superfícies
-## ficam no mesmo plano e a decisão de qual aparece primeiro vira sorteio
-## do teste de profundidade — que é o mesmo corte, só que intermitente.
-## Quatro milímetros dão um pixel de fonte; não se vê.
-const FOLGA_DA_SOLA := 0.004
-## A altura, no mundo, em que a sola do pé da frente encosta.
-const PISO_DO_LUTADOR := ALTURA_DA_LONA + FOLGA_DA_SOLA
+## A FOLGA ENTRE A SOLA E O TAPETE, EM PIXELS DA FOLHA.
+##
+## Em pixels, e não em metros, porque é em pixel que o problema se
+## manifesta: coplanares — ou a menos de um pixel — a borda de baixo da
+## bota e o topo do tapete caem na MESMA linha de pixel da tela, e qual
+## das duas ganha vira sorteio do teste de profundidade. O resultado é
+## um corte reto atravessando a bota, que não some e não se explica: a
+## "linha invisível".
+##
+## Dois pixels da folha (uns nove milímetros no ringue, três pixels na
+## janela da arena) separam as duas de vez. É pouco o bastante para a
+## sombra de contato fechar o vão, e a bota fica inteira.
+const FOLGA_DA_SOLA_PX := 2.0
+
+## A MANCHA DE CONTATO FICA ABAIXO DA SOLA, E ISSO É UMA CORREÇÃO.
+##
+## Ela estava em y = 0,022, ou seja, ACIMA da bota. Uma mancha é um
+## plano horizontal; posta acima da sola, ela ATRAVESSA o desenho e
+## escurece tudo o que fica abaixo da altura dela. Era um segundo corte
+## na bota, do mesmo tipo do primeiro e pela mesma razão — só que este
+## tinha sido posto aqui por mim, para esconder o primeiro.
+##
+## Logo acima do tapete e logo ABAIXO da sola, ela não cruza desenho
+## nenhum: aparece só no tapete, em volta e à frente dos pés, que é onde
+## uma sombra de contato mora.
+const ALTURA_DA_SOMBRA := ALTURA_DA_LONA + 0.002
+
+## A altura, no mundo, em que a BORDA DE BAIXO da bota encosta.
+##
+## Não é constante porque depende do tamanho do pixel da folha, que sai
+## da arte medida (`Lutador3D.PIXEL_NO_MUNDO`). Trocar a arte por outra
+## de resolução diferente reajusta a folga sozinho.
+static func piso_do_lutador() -> float:
+	return ALTURA_DA_LONA + Lutador3D.PIXEL_NO_MUNDO * FOLGA_DA_SOLA_PX
 
 ## Cores da arena. O salão é claro no 2D; aqui dentro é escuro de
 ## propósito — o quadro tem de ler como uma JANELA para outro lugar, e
@@ -485,12 +512,13 @@ func instalar() -> bool:
 	lutador.name = "Lutador"
 	# QUEM SABE ONDE FICA O CHÃO É A ARENA, NÃO O LUTADOR.
 	#
-	# `Lutador3D` põe a sola do pé da frente no y = 0 DELE e não tem como
-	# saber que o ringue tem um miolo levantado. Erguer o nó inteiro até
-	# `PISO_DO_LUTADOR` é o que faz a bota pousar EM CIMA do tapete em vez
-	# de dentro dele — e continua deixando a perna de trás, que a folha
-	# traz cortada mais embaixo, terminando sob o tapete, escondida.
-	lutador.position.y = PISO_DO_LUTADOR
+	# `Lutador3D` põe a borda de baixo da bota no y = 0 DELE e não tem
+	# como saber que o ringue tem um miolo levantado. Erguer o nó inteiro
+	# até `piso_do_lutador()` é o que faz a bota pousar EM CIMA do tapete
+	# em vez de ser atravessada por ele — e continua deixando a perna de
+	# trás, que a folha traz cortada mais embaixo, terminando sob o
+	# tapete, escondida.
+	lutador.position.y = piso_do_lutador()
 	_mundo.add_child(lutador)
 	lutador.montar()
 	_montar_sombra_de_contato()
@@ -529,26 +557,41 @@ func _montar_sombra_de_contato() -> void:
 	_sombra.mesh = malha
 	_sombra.material_override = tinta
 	_sombra.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Logo acima do tapete: o bastante para não brigar com ele pelo mesmo
-	# pixel de profundidade, pouco o bastante para não flutuar. Sai da
-	# mesma constante do chão — uma mancha alguns milímetros abaixo do
-	# miolo simplesmente não apareceria.
-	_sombra.position = Vector3(0.0, ALTURA_DA_LONA + 0.007, 0.0)
+	# Entre o tapete e a sola. Ver `ALTURA_DA_SOMBRA`: acima da sola ela
+	# atravessava o desenho e virava mais um corte na bota.
+	_sombra.position = Vector3(0.0, ALTURA_DA_SOMBRA, 0.0)
 	_mundo.add_child(_sombra)
 
-## A MANCHA ACOMPANHA O CORPO. Ela anda com a respiração e com o recuo
-## do golpe; no tombo ela se espalha e clareia, porque um corpo deitado
-## toca o tapete com tudo e a sombra dele não é mais um ponto.
+## A MANCHA ACOMPANHA O CORPO — e SOME NO TOMBO.
+##
+## Ela anda com a respiração e com o recuo do golpe, que é o que impede
+## o corpo de deslizar por cima de uma mancha parada. Mas no tombo ela
+## tem de sair de cena, e não só clarear.
+##
+## O motivo é o mesmo corte de sempre. A mancha é um PLANO HORIZONTAL a
+## dois milímetros do tapete; enquanto o lutador está de pé, todo o
+## desenho fica acima dela e os dois não se tocam. No tombo o corpo
+## desce trinta e quatro centímetros, e aí o plano da mancha passa a
+## ATRAVESSAR a ilustração: tudo o que fica abaixo da altura dela
+## escurece de uma vez, numa linha reta. Um corpo caído já está no
+## tapete e não precisa de mancha nenhuma para dizer que encostou.
+##
+## O sumiço é rápido de propósito — some antes de o corpo ter descido
+## metade do caminho, para não haver um instante em que a linha apareça.
 func _sombra_de_contato() -> void:
 	if _sombra == null or lutador == null:
 		return
 	var desloc := lutador.deslocamento()
 	var caido := clampf(lutador.queda, 0.0, 1.0)
-	_sombra.position = Vector3(desloc.x, ALTURA_DA_LONA + 0.007, desloc.z * 0.6)
-	_sombra.scale = Vector3(lerpf(1.0, 1.8, caido), 1.0, lerpf(1.0, 1.45, caido))
+	var some := clampf(caido * 2.5, 0.0, 1.0)
+	_sombra.visible = some < 1.0
+	if not _sombra.visible:
+		return
+	_sombra.position = Vector3(desloc.x, ALTURA_DA_SOMBRA, desloc.z * 0.6)
+	_sombra.scale = Vector3(lerpf(1.0, 1.35, caido), 1.0, lerpf(1.0, 1.2, caido))
 	var tinta := _sombra.material_override as StandardMaterial3D
 	if tinta != null:
-		tinta.albedo_color.a = lerpf(0.62, 0.28, caido)
+		tinta.albedo_color.a = lerpf(0.62, 0.0, some)
 
 ## O LUTADOR NÃO É MAIS PINTADO AQUI, e o bloco que fazia isso — cento e
 ## poucas linhas de sombreador de desenho, contorno por casca invertida e
@@ -681,7 +724,7 @@ func _calcular_enquadramento() -> void:
 	# cima. E a conta parte do PISO, não de zero: o lutador está pousado
 	# em cima do miolo da lona, e enquadrar a partir de zero deixaria a
 	# folga de baixo um centímetro e meio menor do que a de cima.
-	var base := PISO_DO_LUTADOR - (janela - figura) * 0.5
+	var base := piso_do_lutador() - (janela - figura) * 0.5
 	var inclinacao := atan(CAMERA_ACIMA_DA_MIRA / _distancia)
 	_altura_da_camera = base + _distancia * tan(inclinacao + meia)
 	_altura_da_mira = _altura_da_camera - CAMERA_ACIMA_DA_MIRA

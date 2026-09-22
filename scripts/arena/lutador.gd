@@ -122,6 +122,21 @@ const SOLA_DO_PE_PX := 418.0
 ## Quanto o lutador mede no ringue, do topo da cabeça à sola.
 const ALTURA_DA_FIGURA := 1.80
 
+## A SOLA É A BORDA DE BAIXO DA LINHA 418, E NÃO A LINHA 418.
+##
+## Uma linha de textura OCUPA UM INTERVALO, não é um ponto. Num
+## `AnimatedSprite3D` centrado, a linha `r` vai de `v = r` (borda de
+## cima) a `v = r + 1` (borda de baixo). `SOLA_DO_PE_PX` é a última
+## linha COM TINTA; o chão encosta na borda de baixo dela, que fica um
+## pixel adiante.
+##
+## Errar isto por um pixel não some: deixa a última linha da bota
+## ATRAVESSADA pelo tapete, metade acima e metade abaixo. E como o
+## tapete é desenhado na frente do desenho, o que se vê é um corte reto
+## no meio da bota — a "linha invisível". Um pixel da folha, quatro
+## milímetros no ringue, e é o bastante.
+const SOLA_NO_QUADRO_PX := SOLA_DO_PE_PX + 1.0
+
 ## O tamanho do pixel no mundo sai da figura medida, não do quadro
 ## inteiro — é a única forma de o lutador medir de fato 1,80 m.
 const PIXEL_NO_MUNDO := ALTURA_DA_FIGURA / (SOLA_DO_PE_PX - TOPO_DA_CABECA_PX + 1.0)
@@ -209,16 +224,20 @@ func montar(_ignorado: Variant = null) -> void:
 	_figura.alpha_scissor_threshold = 0.04
 	_figura.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	_figura.pixel_size = PIXEL_NO_MUNDO
-	# A SOLA DO PÉ DA FRENTE ENCOSTA EM y = 0, QUE É A LONA.
+	# A BORDA DE BAIXO DA BOTA ENCOSTA EM y = 0, QUE É O CHÃO.
 	#
 	# O sprite é centrado, então o meio do quadro cai na linha 213. Subir
-	# o desenho pela distância entre essa linha e a da sola põe o pé no
-	# tapete — e deixa a perna de trás, que a folha traz cortada na borda
-	# de baixo, TERMINANDO ABAIXO DA LONA, onde o próprio tapete a
-	# esconde. É a única coisa que o código pode fazer por um desenho sem
-	# pé; o resto é arte.
+	# o desenho pela distância entre essa linha e a BORDA DE BAIXO da
+	# sola (ver `SOLA_NO_QUADRO_PX` — é um pixel adiante da última linha
+	# com tinta) põe a bota inteira em cima do chão, sem nenhuma parte
+	# dela atravessada pelo plano do tapete.
+	#
+	# E deixa a perna de trás, que a folha traz cortada na borda de baixo
+	# do quadro, terminando ABAIXO do chão, onde o tapete a esconde. É a
+	# única coisa que o código pode fazer por um desenho sem pé; o resto
+	# é arte.
 	_figura.position = Vector3(
-		0.0, PIXEL_NO_MUNDO * (SOLA_DO_PE_PX - ALTURA_DA_FOLHA * 0.5), 0.0
+		0.0, PIXEL_NO_MUNDO * (SOLA_NO_QUADRO_PX - ALTURA_DA_FOLHA * 0.5), 0.0
 	)
 	_corpo.add_child(_figura)
 	_descanso = _corpo.transform
