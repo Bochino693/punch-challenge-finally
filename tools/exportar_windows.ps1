@@ -210,11 +210,38 @@ function Erros-Do-Godot() {
 ## Sem gravar os recursos, o executavel sai com o icone padrao do Godot
 ## e funciona igual. Para um gabinete que abre em tela cheia no logon,
 ## o icone do .exe nao e visto por ninguem.
+## E O PRESET E NORMALIZADO ANTES DE CADA TENTATIVA.
+##
+## O export_presets.cfg e um arquivo que o EDITOR do Godot reescreve
+## sozinho sempre que alguem abre o projeto e mexe em qualquer coisa. Ele
+## aparece modificado no `git status` do dia a dia, e duas opcoes dele
+## decidem o FORMATO do pacote:
+##
+##   binary_format/embed_pck   -- com `true`, todo o conteudo vai DENTRO
+##       do .exe e nao existe PunchChallenge.pck. O jogo ate roda, mas o
+##       pacote deixa de ter a forma que o instalador e a conferencia
+##       esperam -- e este projeto escolheu o PCK separado de proposito,
+##       porque o embutido ja devolveu "cabecalho do executavel
+##       corrompido" aqui;
+##   application/modify_resources -- exige o rcedit configurado.
+##
+## Deixar a exportacao a merce do que ficou gravado nesse arquivo e
+## deixa-la a merce da ultima vez que alguem abriu o editor. Aqui o
+## preset e ajustado numa copia temporaria e RESTAURADO no `finally`:
+## o arquivo do repositorio nao muda, e o pacote sai sempre na mesma
+## forma.
 function Exportar([bool]$comRecursos) {
-    $original = $null
+    $original = [System.IO.File]::ReadAllText($presetArquivo)
+    $texto = $original
+    $texto = $texto -replace 'binary_format/embed_pck\s*=\s*true', 'binary_format/embed_pck=false'
     if (-not $comRecursos) {
-        $original = [System.IO.File]::ReadAllText($presetArquivo)
-        $texto = $original -replace 'application/modify_resources=true', 'application/modify_resources=false'
+        $texto = $texto -replace 'application/modify_resources\s*=\s*true', 'application/modify_resources=false'
+    }
+    $mexeu = ($texto -ne $original)
+    if ($mexeu) {
+        if ($original -match 'binary_format/embed_pck\s*=\s*true') {
+            Aviso "o preset local estava com embed_pck=true; exportando com o PCK separado."
+        }
         # WriteAllText do .NET grava UTF-8 SEM BOM. Um BOM aqui faria o
         # Godot tropecar na primeira linha do proprio preset.
         [System.IO.File]::WriteAllText($presetArquivo, $texto)
@@ -234,7 +261,7 @@ function Exportar([bool]$comRecursos) {
         # vazia" era literalmente isso: nunca houve destino.
         return Invocar-Godot @("--headless", "--path", $raiz, "--export-release", $Preset, $exeFinal)
     } finally {
-        if ($null -ne $original) {
+        if ($mexeu) {
             [System.IO.File]::WriteAllText($presetArquivo, $original)
         }
     }
@@ -338,8 +365,34 @@ O log completo do Godot esta em:
   $logErro
 "@
 }
+# O QUE SAIU, LOGO AQUI. Nao no fim do script: toda conferencia daqui
+# para baixo pode parar, e parar sem dizer o que existe na pasta foi o
+# que obrigou a perguntar "e o que tem la?" em toda rodada.
+Write-Host "    saiu isto:"
+Get-ChildItem -Path $saida -Recurse -File -ErrorAction SilentlyContinue |
+    Sort-Object FullName |
+    ForEach-Object {
+        Write-Host ("      {0,12:N0}  {1}" -f $_.Length, $_.FullName.Substring($saida.Length).TrimStart('\'))
+    }
+
 if (-not (Test-Path -LiteralPath $pckFinal)) {
-    throw "O executavel saiu mas nao ha PunchChallenge.pck. O pacote estaria incompleto."
+    throw @"
+O executavel saiu mas nao ha PunchChallenge.pck ao lado dele.
+
+O PCK e TODO o conteudo do jogo -- cenas, arte, som. Sem ele o
+executavel nem abre, entao o pacote nao pode seguir assim.
+
+A exportacao ja forca binary_format/embed_pck=false, entao nao e o
+preset. Restam duas hipoteses, e o `saiu isto` logo acima separa as
+duas:
+
+  - se o PunchChallenge.exe tem umas dezenas de megabytes A MAIS do que
+    o template do Godot, o conteudo foi embutido nele assim mesmo;
+  - se o .exe tem o tamanho do template puro, o empacotamento nao
+    chegou a acontecer -- veja o fim do log em:
+        $logSaida
+        $logErro
+"@
 }
 Write-Host "    exportou: $exeFinal"
 
