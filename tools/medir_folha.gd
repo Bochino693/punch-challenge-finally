@@ -26,12 +26,15 @@ func _init() -> void:
 	print("FOLHA: %s" % folha)
 	print("limiar de alfa: %d de 255" % FolhaDoLutador.LIMIAR)
 	print("")
-	print("pose              topo  base   esq   dir   sola do pé da frente  encosta na borda")
+	print("A SOLA É A BASE: a figura encosta no chão pelo ponto mais baixo.")
+	print("O pé de trás aparece mais alto por perspectiva e NÃO é o chão.")
+	print("")
+	print("pose              topo  base(=sola)  pé de trás   encosta na borda")
 	for nome in medidas:
 		var m: Dictionary = medidas[nome]
-		print("%-16s %5d %5d %5d %5d %21s  %s" % [
-			nome, m["topo"], m["base"], m["esquerda"], m["direita"],
-			("%d" % m["sola"]) if int(m["sola"]) >= 0 else "—",
+		print("%-16s %5d %12d %11s   %s" % [
+			nome, m["topo"], m["base"],
+			("%d" % m["pe_de_tras"]) if int(m["pe_de_tras"]) >= 0 else "—",
 			", ".join(m["bordas"]) if not (m["bordas"] as PackedStringArray).is_empty() else "—",
 		])
 	print("")
@@ -63,15 +66,18 @@ func _sugerir(medidas: Dictionary) -> void:
 		altura_px, float(altura_px) / FolhaDoLutador.LADO_Y * 100.0])
 	print("    pixel no mundo = %.6f m" % (alvo / float(altura_px)))
 	print("    quadro inteiro = %.4f m" % (FolhaDoLutador.LADO_Y * alvo / float(altura_px)))
-	var cortadas := PackedStringArray()
-	for nome in medidas:
-		if "BAIXO" in (medidas[nome]["bordas"] as PackedStringArray):
-			cortadas.append(str(nome))
+	var flutuando := PackedStringArray()
+	for nome in FolhaDoLutador.POSES_QUE_PISAM:
+		if not medidas.has(nome):
+			continue
+		if not ("BAIXO" in (medidas[nome]["bordas"] as PackedStringArray)):
+			flutuando.append(str(nome))
 	print("")
-	if cortadas.is_empty():
-		print("Nenhuma pose encosta na borda de baixo: a folha está inteira.")
+	if flutuando.is_empty():
+		print("Todas as poses de pé alcançam a linha do chão.")
 	else:
-		print("POSES CORTADAS NA BORDA DE BAIXO (o pé não cabe no quadro):")
-		print("    %s" % ", ".join(cortadas))
-		print("    Isto é defeito de ARTE, não de código: reexporte a folha")
-		print("    com a figura menor dentro da mesma célula.")
+		print("POSES DE PÉ QUE NÃO ALCANÇAM A ÚLTIMA LINHA DA CÉLULA:")
+		print("    %s" % ", ".join(flutuando))
+		print("    Elas vão aparecer flutuando acima do tapete. A linha do")
+		print("    chão é a borda de baixo da célula, e é lá que a sola do")
+		print("    pé da frente tem de ser desenhada.")

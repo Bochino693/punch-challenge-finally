@@ -67,16 +67,17 @@ const CAMERA_ACIMA_DA_MIRA := 0.21
 ## lutador foi posto a pisar. Só que EM CIMA dela há um miolo mais claro
 ## de 3 × 3 que sobe até **y = 0,015** — um centímetro e meio —, e é ele
 ## que está debaixo do lutador. Ou seja: o chão de verdade nunca esteve
-## em zero, e a bota do pé da frente ficava um centímetro e meio DENTRO
-## do miolo.
+## em zero, e a bota ficava um centímetro e meio DENTRO do miolo.
 ##
-## E, de novo, isso não se vê como pé enterrado: o miolo é desenhado na
-## frente do plano do desenho, então o que se vê é a PONTA DA BOTA
-## CORTADA — quatro ou cinco pixels dela comidos pelo tapete. Foi o que
-## sobrou depois de a sola ter sido posta em zero.
+## E isso não se vê como pé enterrado: o miolo é desenhado na frente do
+## plano do desenho, então o que se vê é a BOTA CORTADA, comida pelo
+## tapete.
 ##
 ## Agora o miolo é construído a partir desta constante e o lutador é
-## pousado nela, então os dois não têm como divergir de novo.
+## pousado nela, então os dois não têm como divergir de novo. E, com a
+## linha do chão do desenho corrigida (ver `Lutador3D.SOLA_DO_PE_PX`),
+## o desenho INTEIRO fica acima deste plano: não há mais nada que o
+## tapete possa cortar.
 const ALTURA_DA_LONA := 0.015
 ## A FOLGA ENTRE A SOLA E O TAPETE, EM PIXELS DA FOLHA.
 ##
@@ -512,12 +513,10 @@ func instalar() -> bool:
 	lutador.name = "Lutador"
 	# QUEM SABE ONDE FICA O CHÃO É A ARENA, NÃO O LUTADOR.
 	#
-	# `Lutador3D` põe a borda de baixo da bota no y = 0 DELE e não tem
-	# como saber que o ringue tem um miolo levantado. Erguer o nó inteiro
-	# até `piso_do_lutador()` é o que faz a bota pousar EM CIMA do tapete
-	# em vez de ser atravessada por ele — e continua deixando a perna de
-	# trás, que a folha traz cortada mais embaixo, terminando sob o
-	# tapete, escondida.
+	# `Lutador3D` põe o ponto mais baixo do desenho no y = 0 DELE e não
+	# tem como saber que o ringue tem um miolo levantado. Erguer o nó
+	# inteiro até `piso_do_lutador()` é o que faz o desenho pousar EM
+	# CIMA do tapete em vez de ser atravessado por ele.
 	lutador.position.y = piso_do_lutador()
 	_mundo.add_child(lutador)
 	lutador.montar()
@@ -534,12 +533,11 @@ func instalar() -> bool:
 ## colado mesmo sem saber dizer por quê. É o mesmo motivo pelo qual todo
 ## jogo que põe sprite em cena 3D desenha uma mancha embaixo.
 ##
-## E AQUI ELA FAZ UM SEGUNDO SERVIÇO. A folha traz a perna de trás
-## cortada na borda de baixo do quadro (o desenho não tem esse pé). O
-## corte fica abaixo da lona, escondido pelo próprio tapete, mas a junta
-## ainda é uma linha reta onde deveria haver um pé. A mancha cai
-## exatamente sobre essa junta e a apaga. Não substitui consertar a
-## arte — apenas impede que o defeito seja a primeira coisa que se vê.
+## E ELA FECHA O VÃO DA FOLGA. Entre a sola e o tapete há dois pixels
+## de propósito (ver `FOLGA_DA_SOLA_PX`): sem eles as duas superfícies
+## caem na mesma linha de pixel da tela e o tapete corta a bota. Dois
+## pixels de vão, porém, também se veem — e é a mancha, logo embaixo,
+## que os fecha.
 func _montar_sombra_de_contato() -> void:
 	var malha := PlaneMesh.new()
 	malha.size = Vector2(0.94, 0.50)

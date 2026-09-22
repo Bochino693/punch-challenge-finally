@@ -101,28 +101,40 @@ const RECUO := {
 ##
 ## A versão anterior dizia "a figura ocupa cerca de 86% dos 426 px" e
 ## tirava daí um quadro de 2,09 m. Não ocupa: medindo o alfa da folha,
-## pose por pose, a figura em pé vai da linha 2 (topo da cabeça) à linha
-## 418 (sola do pé da frente) — 417 px, ou 97,9% do quadro. Com a conta
-## antiga o lutador saía com 2,03 m de altura em vez de 1,80, e era esse
-## excesso que estourava o enquadramento por cima e por baixo. A câmera
-## foi sendo afastada três vezes para compensar um erro de escala.
+## pose por pose, a figura em pé ocupa 99,5% do quadro. Com a conta
+## antiga o lutador saía com mais de 2 m de altura em vez de 1,80, e era
+## esse excesso que estourava o enquadramento. A câmera foi sendo
+## afastada três vezes para compensar um erro de escala.
 ##
-## Agora a escala sai da MEDIDA: `tools/medir_folha.gd` imprime estas
-## linhas para qualquer folha, e `tests/test_folha_lutador.gd` reprova a
-## build se a folha do disco deixar de bater com o que está declarado
-## aqui. Trocar a arte passa a ser medir de novo, não adivinhar.
+## A LINHA DO CHÃO É A BORDA DE BAIXO DO QUADRO, e isto custou três
+## tentativas para ser entendido.
+##
+## O lutador está em guarda, com um pé à frente do outro. No desenho, o
+## pé DE TRÁS aparece mais ALTO — é perspectiva, o chão sobe na tela
+## conforme se afasta — e o pé DA FRENTE encosta na borda de baixo da
+## célula. Medindo só a metade esquerda da folha, encontrava-se o pé de
+## trás, na linha 418, e era ele que estava sendo pousado no tapete.
+## Resultado: a bota da FRENTE, oito pixels mais baixa, ficava enterrada
+## no tapete e aparecia decepada. Foi o corte que sobreviveu a todas as
+## correções anteriores, porque a régua é que estava errada.
+##
+## A régua certa é simples: a figura encosta no chão pelo PONTO MAIS
+## BAIXO dela, que é a última linha com tinta da célula. As duas botas
+## estão inteiras na arte; o que faltava era pousar a certa.
+##
+## `tools/medir_folha.gd` imprime estas linhas para qualquer folha, e
+## `tests/test_folha_lutador.gd` reprova a build se a folha do disco
+## deixar de bater com o que está declarado aqui.
 const ALTURA_DA_FOLHA := 426.0
 ## A linha mais alta com tinta nas poses em pé (`guarda`, `idle`).
 const TOPO_DA_CABECA_PX := 2.0
-## A linha da SOLA DO PÉ DA FRENTE nas poses em pé. É ela, e não a borda
-## de baixo do quadro, que encosta na lona: a borda de baixo está
-## ocupada pela perna de trás, que vem CORTADA na folha (ver
-## `POSES_COM_PE_CORTADO` no teste).
-const SOLA_DO_PE_PX := 418.0
+## A ÚLTIMA LINHA COM TINTA das poses em pé — a sola do pé DA FRENTE,
+## que é o ponto mais baixo da figura e o que encosta na lona.
+const SOLA_DO_PE_PX := 425.0
 ## Quanto o lutador mede no ringue, do topo da cabeça à sola.
 const ALTURA_DA_FIGURA := 1.80
 
-## A SOLA É A BORDA DE BAIXO DA LINHA 418, E NÃO A LINHA 418.
+## A SOLA É A BORDA DE BAIXO DA ÚLTIMA LINHA, E NÃO A LINHA.
 ##
 ## Uma linha de textura OCUPA UM INTERVALO, não é um ponto. Num
 ## `AnimatedSprite3D` centrado, a linha `r` vai de `v = r` (borda de
@@ -135,6 +147,10 @@ const ALTURA_DA_FIGURA := 1.80
 ## tapete é desenhado na frente do desenho, o que se vê é um corte reto
 ## no meio da bota — a "linha invisível". Um pixel da folha, quatro
 ## milímetros no ringue, e é o bastante.
+##
+## Com a sola na última linha da célula, esta conta dá exatamente a
+## borda de baixo do quadro: o desenho INTEIRO fica acima do tapete e
+## nada mais depende de o tapete esconder coisa nenhuma.
 const SOLA_NO_QUADRO_PX := SOLA_DO_PE_PX + 1.0
 
 ## O tamanho do pixel no mundo sai da figura medida, não do quadro
@@ -224,18 +240,19 @@ func montar(_ignorado: Variant = null) -> void:
 	_figura.alpha_scissor_threshold = 0.04
 	_figura.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	_figura.pixel_size = PIXEL_NO_MUNDO
-	# A BORDA DE BAIXO DA BOTA ENCOSTA EM y = 0, QUE É O CHÃO.
+	# A BORDA DE BAIXO DA BOTA DA FRENTE ENCOSTA EM y = 0, QUE É O CHÃO.
 	#
 	# O sprite é centrado, então o meio do quadro cai na linha 213. Subir
 	# o desenho pela distância entre essa linha e a BORDA DE BAIXO da
-	# sola (ver `SOLA_NO_QUADRO_PX` — é um pixel adiante da última linha
-	# com tinta) põe a bota inteira em cima do chão, sem nenhuma parte
-	# dela atravessada pelo plano do tapete.
+	# sola (ver `SOLA_NO_QUADRO_PX`) põe o ponto mais baixo da figura em
+	# cima do chão — e, como esse ponto é a última linha da célula, põe o
+	# DESENHO INTEIRO acima do chão.
 	#
-	# E deixa a perna de trás, que a folha traz cortada na borda de baixo
-	# do quadro, terminando ABAIXO do chão, onde o tapete a esconde. É a
-	# única coisa que o código pode fazer por um desenho sem pé; o resto
-	# é arte.
+	# É o que faz a imagem aparecer completa: nenhuma parte dela fica
+	# abaixo do plano do tapete, então não há nada que o tapete possa
+	# cortar. O pé de trás fica alguns pixels acima da linha do chão, que
+	# é onde a perspectiva do desenho o coloca — é assim que um corpo de
+	# lado pisa num chão que recua.
 	_figura.position = Vector3(
 		0.0, PIXEL_NO_MUNDO * (SOLA_NO_QUADRO_PX - ALTURA_DA_FOLHA * 0.5), 0.0
 	)

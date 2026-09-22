@@ -22,14 +22,30 @@ const LADO_Y := 426.0
 const LIMIAR := 32
 
 ## AS POSES EM PÉ, que são as que definem a escala. `preparado` fica de
-## fora de propósito: o desenho dela é o corpo agachando, e a sola dele
-## está mais alta — medir a escada por ela encolheria o lutador.
+## fora de propósito: o desenho dela é o corpo agachando, e a cabeça
+## dele está mais baixa — medir a escala por ela esticaria o lutador.
 const POSES_EM_PE := ["guarda", "idle"]
+
+## AS POSES EM QUE O LUTADOR ESTÁ COM OS DOIS PÉS NO CHÃO.
+##
+## Todas elas têm de alcançar a última linha da célula, porque é ali que
+## a arte desenhou a sola do pé da frente. Uma que não alcance está
+## flutuando — e uma que a arte desenhe mais baixa não existe, porque
+## não há mais célula.
+const POSES_QUE_PISAM := [
+	"guarda", "idle", "preparado", "jab", "direto", "impacto_corpo",
+]
 
 ## Mede cada pose de uma `SpriteFrames`. Devolve, por nome de pose:
 ##   topo, base, esquerda, direita — a caixa do desenho DENTRO da célula;
-##   sola — a última linha com tinta na METADE ESQUERDA da célula, que é
-##          onde fica o pé da frente nas poses em pé;
+##   sola — a mesma coisa que `base`, e está aqui com este nome porque é
+##          ela que encosta no chão: a figura pousa pelo PONTO MAIS
+##          BAIXO;
+##   pe_de_tras — a última linha com tinta na metade esquerda. Informa,
+##          mas NÃO serve de chão: o lutador está em guarda, um pé à
+##          frente do outro, e o de trás aparece mais alto por
+##          perspectiva. Foi confundir um com o outro que deixou a bota
+##          da frente enterrada oito pixels no tapete;
 ##   bordas — quais bordas da célula o desenho encosta.
 ## Devolve vazio quando a folha não pôde ser lida.
 static func medir(caminho: String) -> Dictionary:
@@ -75,7 +91,7 @@ static func _medir_regiao(bytes: PackedByteArray, largura: int, regiao: Rect2) -
 	var base := y0 - 1
 	var esquerda := x1
 	var direita := x0 - 1
-	var sola := -1
+	var pe_de_tras := -1
 	for y in range(y0, y1):
 		var linha := y * largura * 4
 		var achou_na_esquerda := false
@@ -93,14 +109,14 @@ static func _medir_regiao(bytes: PackedByteArray, largura: int, regiao: Rect2) -
 			if x < meio:
 				achou_na_esquerda = true
 		if achou_na_esquerda:
-			sola = y
+			pe_de_tras = y
 
 	var bordas := PackedStringArray()
 	if base < y0:
 		# célula vazia: nada a dizer sobre bordas
 		return {
 			"topo": 0, "base": -1, "esquerda": 0, "direita": -1,
-			"sola": -1, "bordas": bordas, "vazia": true,
+			"sola": -1, "pe_de_tras": -1, "bordas": bordas, "vazia": true,
 		}
 	if topo <= y0:
 		bordas.append("CIMA")
@@ -115,7 +131,10 @@ static func _medir_regiao(bytes: PackedByteArray, largura: int, regiao: Rect2) -
 		"base": base - y0,
 		"esquerda": esquerda - x0,
 		"direita": direita - x0,
-		"sola": (sola - y0) if sola >= 0 else -1,
+		# A SOLA É A BASE. A figura encosta no chão pelo ponto mais baixo
+		# dela, e não pelo pé que por acaso está mais à esquerda.
+		"sola": base - y0,
+		"pe_de_tras": (pe_de_tras - y0) if pe_de_tras >= 0 else -1,
 		"bordas": bordas,
 		"vazia": false,
 	}

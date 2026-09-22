@@ -6,30 +6,35 @@ extends SceneTree
 ## de duas maneiras diferentes ao mesmo tempo:
 ##
 ##   1. A ESCALA ERA UM CHUTE. `lutador.gd` dizia que a figura ocupava
-##      "cerca de 86%" dos 426 px da célula. Medindo, ocupa 97,9%. Com a
-##      conta antiga o lutador saía com 2,03 m em vez de 1,80 e
+##      "cerca de 86%" dos 426 px da célula. Medindo, ocupa 99,5%. Com a
+##      conta antiga o lutador saía com mais de 2 m em vez de 1,80 e
 ##      estourava o enquadramento — e a câmera foi afastada três vezes
 ##      para compensar, cada vez com um parágrafo explicando o porquê.
-##   2. A FOLHA ESTÁ MESMO CORTADA. Em seis das nove poses o desenho
-##      encosta na borda de baixo da célula: a perna de trás termina na
-##      última linha, sem pé. Isso é defeito de ARTE — nenhuma conta
-##      conserta — e por isso está DECLARADO aqui embaixo, com nome e
-##      sobrenome, em vez de virar surpresa.
+##   2. A RÉGUA DO CHÃO ESTAVA ERRADA, e este teste ajudou a mantê-la
+##      errada. O lutador está em guarda, um pé à frente do outro; no
+##      desenho o pé DE TRÁS aparece mais ALTO, por perspectiva. A
+##      medida procurava a sola na METADE ESQUERDA da célula, achava o
+##      pé de trás (linha 418) e chamava aquilo de chão. A bota da
+##      FRENTE, oito pixels mais baixa, ficava enterrada no tapete e
+##      aparecia decepada — e o teste aprovava, porque estava medindo a
+##      mesma coisa errada que o código.
+##
+##      A régua certa: a figura encosta no chão pelo PONTO MAIS BAIXO
+##      dela. As duas botas estão inteiras na arte.
 ##
 ## O que este teste garante: as constantes de `lutador.gd` batem com o
-## que a folha do disco realmente tem, e nenhuma pose NOVA passou a ser
-## cortada sem alguém ficar sabendo.
+## que a folha do disco realmente tem, e nenhuma pose de pé flutua.
 ##
 ## Uso:
 ##     godot --headless --path . --script tests/test_folha_lutador.gd
 
-## AS POSES QUE JÁ CHEGAM CORTADAS NA BORDA DE BAIXO. Não é uma lista de
-## permissões: é a dívida de arte, escrita por extenso. Quando a folha
-## for reexportada com a figura inteira dentro da célula, o teste avisa
-## que a lista pode encolher.
-const POSES_COM_PE_CORTADO := [
-	"guarda", "idle", "preparado", "jab", "direto", "impacto_corpo",
-]
+## POSES EM QUE O LUTADOR ESTÁ DE PÉ E TEM DE ALCANÇAR A LINHA DO CHÃO.
+##
+## Esta lista já se chamou `POSES_COM_PE_CORTADO` e queria dizer o
+## contrário: eu tinha lido "o desenho encosta na borda de baixo" como
+## defeito. Não é — é ONDE FICA O CHÃO. A arte desenha a sola do pé da
+## frente na última linha da célula, e uma pose de pé que NÃO alcance
+## essa linha é que está errada: ela flutua.
 
 ## Quanta diferença se aceita entre o medido e o declarado, em pixels.
 ## Dois: o limiar de alfa pode mexer uma linha para cada lado quando a
@@ -49,7 +54,7 @@ func _init() -> void:
 	_test_todas_as_poses_tem_desenho(medidas)
 	_test_a_escala_declarada_bate_com_a_folha(medidas)
 	_test_o_lutador_mede_o_que_promete()
-	_test_nenhuma_pose_nova_ficou_cortada(medidas)
+	_test_nenhuma_pose_de_pe_flutua(medidas)
 	_terminar()
 
 ## Uma pose em branco na folha vira um lutador que some no meio de uma
@@ -121,29 +126,28 @@ func _test_o_lutador_mede_o_que_promete() -> void:
 	# tinta ficasse a cavaleiro do zero, o tapete a cortaria ao meio.
 	_ok(topo_da_linha.call(Lutador3D.SOLA_DO_PE_PX) > 0.0,
 		"a última linha com tinta tem de ficar inteira acima do chão")
-	# E a borda de baixo do quadro — onde a perna cortada termina — tem
-	# de ficar ABAIXO do chão, senão o corte aparece no ar em vez de
-	# sumir dentro do tapete.
-	_ok(base_da_linha.call(Lutador3D.ALTURA_DA_FOLHA - 1.0) < 0.0,
-		"a borda de baixo do quadro tem de afundar na lona para o corte não aparecer")
+	# O CONTRATO QUE FALTAVA, E QUE É O PEDIDO INTEIRO: a imagem aparece
+	# COMPLETA. Nenhuma parte do quadro pode ficar abaixo do chão, senão
+	# o tapete — que é desenhado na frente — corta alguma coisa.
+	_ok(base_da_linha.call(Lutador3D.ALTURA_DA_FOLHA - 1.0) >= -0.0005,
+		"nenhuma parte do desenho pode ficar abaixo do chão")
 	l.free()
 
-## NINGUÉM MAIS FICOU CORTADO SEM AVISAR.
+## NENHUMA POSE DE PÉ FLUTUA.
 ##
-## Uma pose cortada que NÃO está na lista é regressão e reprova. Uma
-## pose da lista que deixou de estar cortada é boa notícia: o teste
-## passa e pede que a lista encolha.
-func _test_nenhuma_pose_nova_ficou_cortada(medidas: Dictionary) -> void:
-	var cortadas := PackedStringArray()
-	for nome in medidas:
-		if "BAIXO" in (medidas[nome]["bordas"] as PackedStringArray):
-			cortadas.append(str(nome))
-	for nome in cortadas:
-		_ok(nome in POSES_COM_PE_CORTADO,
-			"a pose %s passou a encostar na borda de baixo: o pé dela foi cortado" % nome)
-	for nome in POSES_COM_PE_CORTADO:
-		if not (str(nome) in cortadas):
-			print("BOA NOTÍCIA: %s não está mais cortada — tire-a de POSES_COM_PE_CORTADO." % nome)
+## Todas as poses em que o lutador está com os pés no chão têm de
+## alcançar a última linha da célula, porque é ali que a arte desenhou a
+## sola do pé da frente e é ali que o código põe o tapete. Uma que pare
+## antes aparece no ar.
+func _test_nenhuma_pose_de_pe_flutua(medidas: Dictionary) -> void:
+	for nome in FolhaDoLutador.POSES_QUE_PISAM:
+		_ok(medidas.has(nome), "a folha precisa da pose %s" % nome)
+		if not medidas.has(nome):
+			continue
+		_ok("BAIXO" in (medidas[nome]["bordas"] as PackedStringArray),
+			"a pose de pé %s não alcança a linha do chão: vai flutuar" % nome)
+		_perto(float(medidas[nome]["base"]), Lutador3D.SOLA_DO_PE_PX, TOLERANCIA_PX,
+			"a sola de %s tem de cair na linha do chão declarada" % nome)
 
 # -------------------------------------------------------------- utilidades
 func _ok(condicao: bool, mensagem: String) -> void:

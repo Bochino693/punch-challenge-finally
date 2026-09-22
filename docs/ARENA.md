@@ -135,15 +135,28 @@ medidas, e duas ferramentas guardam isso:
 | `tools/medir_folha.gd` | mede qualquer folha e imprime as constantes prontas |
 | `tests/test_folha_lutador.gd` | reprova quando a folha do disco e as constantes discordam |
 
-**O pé da perna de trás vem cortado na folha.** Seis das nove poses
-encostam na borda de baixo da célula: o desenho termina no meio da
-canela. É defeito de **arte**, não de código — nenhuma conta inventa um
-pé que não foi desenhado. O que o código faz é pôr a sola do pé da
-FRENTE em `y = 0` (a lona), o que deixa a borda cortada terminando
-abaixo do tapete, onde o próprio tapete a esconde, e desenhar uma
-**sombra de contato** em cima dessa junta. A dívida está declarada por
-extenso em `POSES_COM_PE_CORTADO`, e o teste avisa quando ela puder
-encolher.
+**A linha do chão é a borda de baixo da célula.** Isto custou três
+tentativas para ser entendido, e todas as três falharam pelo mesmo
+motivo: uma régua errada.
+
+O lutador está em guarda, um pé à frente do outro. No desenho, o pé
+**de trás** aparece mais **alto** — é perspectiva, o chão sobe na tela
+conforme se afasta — e o pé **da frente** encosta na borda de baixo da
+célula. A medida procurava a sola na *metade esquerda* da folha,
+encontrava o pé de trás (linha 418) e chamava aquilo de chão. A bota da
+frente, oito pixels mais baixa, ficava enterrada no tapete — e como o
+tapete é desenhado na frente do desenho, aparecia decepada.
+
+Pior: `tests/test_folha_lutador.gd` media a mesma coisa errada, então
+confirmava o defeito em vez de pegá-lo. Foi o corte que sobreviveu a
+três correções seguidas.
+
+A régua certa é a óbvia: **a figura encosta no chão pelo ponto mais
+baixo dela**, que é a última linha com tinta da célula
+(`Lutador3D.SOLA_DO_PE_PX = 425`). As duas botas estão inteiras na
+arte. Com a sola ali, o desenho **inteiro** fica acima do plano do
+tapete e não há mais nada que o tapete possa cortar — que era o pedido:
+a imagem toda, sem cortes.
 
 **O pé não pode entrar na lona — e o sintoma disso é CORTE, não
 afundamento.** A lona é desenhada *na frente* do plano do lutador, então
@@ -241,9 +254,11 @@ Depois de trocar, **meça**:
 godot --headless --path . --script tools/medir_folha.gd
 ```
 
-Ele imprime, pose por pose, a caixa do desenho dentro da célula, diz
-quais encostam nas bordas e devolve `TOPO_DA_CABECA_PX` e
-`SOLA_DO_PE_PX` prontos para colar em `scripts/arena/lutador.gd`. A
+Ele imprime, pose por pose, a caixa do desenho dentro da célula, avisa
+quais poses de pé não alcançam a linha do chão e devolve
+`TOPO_DA_CABECA_PX` e `SOLA_DO_PE_PX` prontos para colar em
+`scripts/arena/lutador.gd`. Ele também mostra o pé de trás em separado —
+para ser lido, e não usado como chão. A
 câmera não precisa de ajuste nenhum: ela se enquadra sozinha a partir
 desses números (`Arena3D._calcular_enquadramento`).
 
