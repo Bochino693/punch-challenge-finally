@@ -55,6 +55,7 @@ func _init() -> void:
 	_test_a_escala_declarada_bate_com_a_folha(medidas)
 	_test_o_lutador_mede_o_que_promete()
 	_test_nenhuma_pose_de_pe_flutua(medidas)
+	_test_a_base_de_cada_pose_bate_com_a_folha(medidas)
 	_terminar()
 
 ## Uma pose em branco na folha vira um lutador que some no meio de uma
@@ -148,6 +149,27 @@ func _test_nenhuma_pose_de_pe_flutua(medidas: Dictionary) -> void:
 			"a pose de pé %s não alcança a linha do chão: vai flutuar" % nome)
 		_perto(float(medidas[nome]["base"]), Lutador3D.SOLA_DO_PE_PX, TOLERANCIA_PX,
 			"a sola de %s tem de cair na linha do chão declarada" % nome)
+
+## A BASE DECLARADA DE CADA POSE É A QUE A FOLHA TEM.
+##
+## `Lutador3D.BASE_DA_POSE` diz, pose por pose, qual é a linha mais
+## baixa com tinta. É dela que sai a regra "nenhuma parte do desenho
+## passa abaixo da lona": sem a tabela certa, o tombo do nocaute manda
+## doze centímetros de desenho para debaixo do tapete, e uma pose com a
+## base declarada baixa demais faz o corpo flutuar.
+##
+## São nove números medidos à mão uma vez. Este teste é o que impede que
+## eles envelheçam em silêncio quando a arte for trocada.
+func _test_a_base_de_cada_pose_bate_com_a_folha(medidas: Dictionary) -> void:
+	for pose in Lutador3D.BASE_DA_POSE:
+		var nome := str(pose)
+		_ok(medidas.has(nome), "a folha precisa da pose %s" % nome)
+		if not medidas.has(nome):
+			continue
+		_perto(float(medidas[nome]["base"]), float(Lutador3D.BASE_DA_POSE[pose]),
+			TOLERANCIA_PX,
+			"BASE_DA_POSE[%s] diz %d e a folha tem %d — rode tools/medir_folha.gd"
+				% [nome, int(Lutador3D.BASE_DA_POSE[pose]), int(medidas[nome]["base"])])
 
 # -------------------------------------------------------------- utilidades
 func _ok(condicao: bool, mensagem: String) -> void:

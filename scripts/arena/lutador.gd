@@ -176,6 +176,23 @@ const ALTURA_DO_QUADRO := ALTURA_DA_FOLHA * PIXEL_NO_MUNDO
 const MEIA_BASE_PX := 165.0
 const MEIA_BASE_DOS_PES := PIXEL_NO_MUNDO * MEIA_BASE_PX
 
+## A LINHA MAIS BAIXA COM TINTA DE CADA POSE, medida na folha.
+##
+## Nem toda pose encosta no chão. As seis de pé vão até a última linha
+## da célula (425), mas `impacto_forte` para na 413, `nocaute` — que é
+## um corpo DEITADO, largo e baixo — para na 375 e `recuperacao` na 392.
+##
+## Isto não é curiosidade: é o que permite a regra única lá embaixo —
+## NENHUMA PARTE DO DESENHO PASSA ABAIXO DA LONA, em pose nenhuma, em
+## instante nenhum. Sem a tabela, o tombo do nocaute afundava o corpo 34
+## cm sem saber que o desenho dele já começa 21 cm acima do chão, e o
+## que sobrava ia parar embaixo do tapete.
+const BASE_DA_POSE := {
+	"guarda": 425.0, "idle": 425.0, "preparado": 425.0,
+	"jab": 425.0, "direto": 425.0, "impacto_corpo": 425.0,
+	"impacto_forte": 413.0, "nocaute": 375.0, "recuperacao": 392.0,
+}
+
 ## Quanto um pé pode SAIR da lona no cambaleio, em metros.
 ##
 ## Escolhe-se o levantar, e o ângulo é consequência — o contrário do que
@@ -238,7 +255,32 @@ func montar(_ignorado: Variant = null) -> void:
 	# quase transparente da folha.
 	_figura.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 	_figura.alpha_scissor_threshold = 0.04
-	_figura.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	# FILTRO LINEAR, SEM MIPMAP — porque a folha é importada SEM mipmaps
+	# (`mipmaps/generate=false`). Pedir um filtro de mipmap a uma textura
+	# que não tem nenhum é uma incoerência que, dependendo do driver, vai
+	# de inofensiva a textura incompleta. E não se perde nada: o desenho
+	# aqui é sempre AMPLIADO, nunca reduzido, e mipmap só serve para
+	# redução.
+	_figura.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+	# ------------------------------------------------------------------
+	# O DESENHO NÃO É TESTADO CONTRA A PROFUNDIDADE. NADA PODE CORTÁ-LO.
+	#
+	# Esta é a única forma de cumprir "a imagem completa, sem cortes"
+	# sem depender de o desenho estar meio pixel acima ou abaixo de um
+	# plano. Três correções seguidas tentaram acertar essa distância —
+	# o miolo levantado da lona, a borda do texel, a altura da sombra —
+	# e a cada uma sobrava um fio de corte, porque o problema não era o
+	# número: era haver um plano com poder de cortar o lutador.
+	#
+	# Não há nada na arena que DEVA passar à frente dele. As cordas da
+	# frente não são desenhadas de propósito, os postes da frente ficam
+	# fora do enquadramento, e o tapete está embaixo. Desligar o teste
+	# resolve a classe inteira do problema em vez de mais um caso dela.
+	#
+	# E é seguro porque a regra de `_com_o_desenho_na_lona` garante o
+	# outro lado: nenhuma parte do desenho fica abaixo do tapete, então
+	# não há nada que "deveria" estar escondido e passaria a aparecer.
+	_figura.no_depth_test = true
 	_figura.pixel_size = PIXEL_NO_MUNDO
 	# A BORDA DE BAIXO DA BOTA DA FRENTE ENCOSTA EM y = 0, QUE É O CHÃO.
 	#
@@ -476,10 +518,6 @@ func _mover_o_corpo() -> void:
 				Vector3.FORWARD, _lado * giro_do_cambaleio() * impacto
 			)
 
-	# NENHUM PÉ ATRAVESSA A LONA — e esta linha vem ANTES do tombo de
-	# propósito: o tombo do nocaute afunda o corpo porque é para afundar.
-	t = _com_os_pes_na_lona(t)
-
 	# O TOMBO — e ele é MENOS do que parece necessário.
 	#
 	# Com um corpo modelado, derrubar exigia girar o corpo inteiro até a
@@ -497,6 +535,10 @@ func _mover_o_corpo() -> void:
 		# centímetro e assenta. É o detalhe que separa "caiu" de
 		# "desapareceu para baixo".
 		t.origin.y += sin(clampf((queda - 0.82) / 0.18, 0.0, 1.0) * PI) * 0.035
+
+	# E A ÚLTIMA PALAVRA É SEMPRE ESTA, depois de tudo — respiração,
+	# recuo, inclinação e tombo.
+	t = _com_o_desenho_na_lona(t)
 	_corpo.transform = t
 
 ## O ÂNGULO DO BALANÇO LATERAL DO CAMBALEIO.
@@ -509,37 +551,59 @@ func _mover_o_corpo() -> void:
 static func giro_do_cambaleio() -> float:
 	return asin(clampf(PE_LEVANTA_NO_CAMBALEIO / (2.0 * MEIA_BASE_DOS_PES), 0.0, 1.0))
 
-## A TRAVA: O CORPO INCLINA, MAS O PÉ NÃO ENTRA NO CHÃO.
+## A ALTURA, NO CORPO, DA LINHA MAIS BAIXA COM TINTA DA POSE ATUAL.
 ##
-## Por que uma trava e não só um ângulo menor. Um ângulo menor conserta
-## o cambaleio de hoje e não impede o próximo ajuste de reabrir o mesmo
-## buraco — e o buraco não é óbvio: ele não aparece como pé enterrado,
-## aparece como pé CORTADO, porque a lona está na frente do desenho e o
-## esconde. Foi assim que a respiração afundava a sola metade do tempo
-## sem ninguém desconfiar.
+## Zero para as poses de pé (elas chegam à última linha da célula) e
+## positivo para as outras — o desenho do nocaute, por exemplo, começa
+## 21 cm acima do chão, porque é um corpo deitado no meio do quadro.
+func _fundo_do_desenho() -> float:
+	var pose := String(_figura.animation) if _figura != null else "idle"
+	var base := float(BASE_DA_POSE.get(pose, SOLA_DO_PE_PX))
+	return PIXEL_NO_MUNDO * (SOLA_DO_PE_PX - base)
+
+## A REGRA ÚNICA: NENHUMA PARTE DO DESENHO PASSA ABAIXO DA LONA.
 ##
-## A trava mede os dois cantos da base do lutador depois de toda a
-## inclinação e translação, e se o mais baixo ficou abaixo da lona sobe
-## o corpo exatamente o que faltava. O resultado é o giro passar a
-## pivotar no pé de baixo — que é o que um corpo que perde a base faz —
-## em vez de pivotar no ar, no meio da figura.
-func _com_os_pes_na_lona(t: Transform3D) -> Transform3D:
-	var esquerdo := t * Vector3(-MEIA_BASE_DOS_PES, 0.0, 0.0)
-	var direito := t * Vector3(MEIA_BASE_DOS_PES, 0.0, 0.0)
+## Por que uma trava e não números menores. Cada ajuste conserta o caso
+## do dia e não impede o próximo de reabrir o mesmo buraco — e o buraco
+## não é óbvio, porque não aparece como corpo enterrado: aparece como
+## corpo CORTADO. Foi assim que a respiração afundava a sola metade do
+## tempo, que o cambaleio enterrava um pé 13 cm e que o tombo do nocaute
+## mandava 12 cm de desenho para debaixo do tapete, tudo sem ninguém
+## conseguir apontar o quê.
+##
+## A trava mede os dois cantos da base da POSE ATUAL — não de uma base
+## fixa — depois de toda a conta de movimento, e se o mais baixo passou
+## do chão sobe o corpo exatamente o que faltava. Três consequências
+## boas de graça:
+##
+##   o giro do cambaleio passa a pivotar no pé de baixo, que é o que um
+##   corpo que perde a base faz;
+##   a respiração vira um balanço que só sobe;
+##   e o tombo do nocaute desce até o desenho ENCOSTAR na lona e para
+##   ali, em vez de continuar até um número escrito à mão.
+##
+## É também o que torna seguro desligar o teste de profundidade do
+## desenho: não há nada abaixo do tapete que devesse estar escondido.
+func _com_o_desenho_na_lona(t: Transform3D) -> Transform3D:
+	var fundo := _fundo_do_desenho()
+	var esquerdo := t * Vector3(-MEIA_BASE_DOS_PES, fundo, 0.0)
+	var direito := t * Vector3(MEIA_BASE_DOS_PES, fundo, 0.0)
 	var mais_baixo := minf(esquerdo.y, direito.y)
 	if mais_baixo < 0.0:
 		t.origin.y -= mais_baixo
 	return t
 
-## A ALTURA DO PÉ MAIS BAIXO. Fora do tombo ela nunca pode ser negativa
-## — é o contrato que o teste confere.
+## A ALTURA DO PONTO MAIS BAIXO DO DESENHO. Nunca pode ser negativa —
+## é o contrato que o teste confere, em qualquer pose e em qualquer
+## instante.
 func pe_mais_baixo() -> float:
 	if _corpo == null:
 		return 0.0
 	var t := _corpo.transform
+	var fundo := _fundo_do_desenho()
 	return minf(
-		(t * Vector3(-MEIA_BASE_DOS_PES, 0.0, 0.0)).y,
-		(t * Vector3(MEIA_BASE_DOS_PES, 0.0, 0.0)).y
+		(t * Vector3(-MEIA_BASE_DOS_PES, fundo, 0.0)).y,
+		(t * Vector3(MEIA_BASE_DOS_PES, fundo, 0.0)).y
 	)
 
 ## A COR DA ILUSTRAÇÃO responde a duas coisas: o clarão do soco, que
@@ -567,7 +631,13 @@ func _pintar() -> void:
 func fundura_do_tombo() -> float:
 	if _corpo == null:
 		return 0.0
-	return clampf(-_corpo.position.y / 0.34, 0.0, 1.5)
+	# NORMALIZADA PELO QUANTO O DESENHO DO NOCAUTE PODE DESCER, e não
+	# pelos 34 cm que o tombo PEDE. O desenho do nocaute é um corpo
+	# deitado que começa 21 cm acima do chão; ele desce esses 21 cm e
+	# encosta. Dividir pelo pedido dava 62% para um corpo que já estava
+	# no tapete.
+	var pode := PIXEL_NO_MUNDO * (SOLA_DO_PE_PX - float(BASE_DA_POSE["nocaute"]))
+	return clampf(-_corpo.position.y / maxf(pode, 0.001), 0.0, 1.5)
 
 ## ONDE O CORPO ESTÁ AGORA em relação ao lugar de descanso.
 ##

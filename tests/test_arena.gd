@@ -136,6 +136,24 @@ func _test_a_janela_tem_a_proporcao_do_buraco() -> void:
 			and Arena3D.TAMANHO_CHEIO.y == int(ArenaQuadro.TELA.size.y),
 		"a janela cheia %s tem de medir o buraco %s, sem esticão" % [
 			Arena3D.TAMANHO_CHEIO, ArenaQuadro.TELA.size])
+	# E A JANELA NÍTIDA TEM DE SER O DOBRO EXATO.
+	#
+	# Dobro exato é o que faz cada pixel final ser a média de quatro
+	# amostras — um filtro de caixa. Um fator quebrado (1,5×, 1,8×)
+	# devolve uma mistura desigual, que borra em vez de antisserrilhar,
+	# e aí o custo extra não compra definição nenhuma.
+	_ok(Arena3D.TAMANHO_NITIDO == Arena3D.TAMANHO_CHEIO * 2,
+		"a janela nítida %s tem de ser o dobro exato de %s" % [
+			Arena3D.TAMANHO_NITIDO, Arena3D.TAMANHO_CHEIO])
+	# E A ESCADA TEM DE TER HISTERESE, senão a janela pisca entre dois
+	# tamanhos toda vez que a qualidade encostar no limiar — e trocar o
+	# tamanho de um SubViewport realoca a textura.
+	_ok(Arena3D.SOBE_PARA_NITIDO > Arena3D.DESCE_DO_NITIDO,
+		"o degrau nítido precisa de histerese")
+	_ok(Arena3D.SOBE_PARA_CHEIO > Arena3D.DESCE_DO_CHEIO,
+		"o degrau cheio precisa de histerese")
+	_ok(Arena3D.DESCE_DO_NITIDO > Arena3D.SOBE_PARA_CHEIO,
+		"os dois degraus não podem se cruzar")
 
 ## A BOTA POUSA EM CIMA DO TAPETE, E NÃO DENTRO DELE.
 ##
@@ -156,17 +174,17 @@ func _test_a_bota_pousa_em_cima_do_tapete() -> void:
 	var piso := Arena3D.piso_do_lutador()
 	_ok(piso > Arena3D.ALTURA_DA_LONA,
 		"a sola tem de ficar ACIMA do tapete, senão o tapete come a bota")
-	# A FOLGA TEM DE VALER MAIS DE UM PIXEL DA FOLHA.
+	# A FOLGA É SÓ ESTÉTICA AGORA, e por isso tem de ser PEQUENA.
 	#
-	# Menos do que isso e a borda de baixo da bota e o topo do tapete
-	# caem na mesma linha de pixel da tela — qual das duas aparece vira
-	# sorteio do teste de profundidade, e o resultado é o corte reto que
-	# atravessa a bota. Mais do que dois e o lutador começa a flutuar.
+	# Ela já foi a defesa contra o corte, e nessa função precisava de
+	# dois pixels. Quem impede o corte passou a ser `no_depth_test` no
+	# desenho: nenhum plano tem mais poder de cortá-lo. O que sobra para
+	# a folga é caber a sombra de contato embaixo da sola — um pixel — e
+	# não mais do que isso, senão o lutador flutua.
 	var folga := piso - Arena3D.ALTURA_DA_LONA
-	_ok(folga > Lutador3D.PIXEL_NO_MUNDO * 1.5,
-		"a folga da sola tem de passar de um pixel e meio da folha")
-	_ok(folga <= Lutador3D.PIXEL_NO_MUNDO * 3.0,
-		"a folga da sola não pode passar de três pixels da folha")
+	_ok(folga > 0.0, "a sola tem de ficar acima do tapete")
+	_ok(folga <= Lutador3D.PIXEL_NO_MUNDO * 1.5,
+		"a folga da sola não pode passar de um pixel e meio da folha")
 	# A MANCHA DE CONTATO FICA ENTRE O TAPETE E A SOLA.
 	#
 	# Ela é um plano horizontal: acima da sola, ATRAVESSA o desenho e
@@ -179,6 +197,11 @@ func _test_a_bota_pousa_em_cima_do_tapete() -> void:
 	var arena := Arena3D.new()
 	get_root().add_child(arena)
 	_ok(arena.instalar(), "a arena tem de conseguir montar o lutador")
+	# NADA PODE CORTAR O LUTADOR. É o contrato que substituiu três
+	# tentativas de acertar a distância entre o desenho e o tapete.
+	var figura := arena.get_node_or_null("Mundo/Lutador/Corpo/Figura") as AnimatedSprite3D
+	_ok(figura != null and figura.no_depth_test,
+		"o desenho do lutador não pode ser testado contra a profundidade")
 	# E NO TOMBO A MANCHA TEM DE SUMIR. O corpo desce 34 cm; o plano da
 	# mancha, que ficava abaixo dele, passa a atravessá-lo e escurece
 	# tudo o que fica sob a altura dela numa linha reta. Um corpo caído
@@ -266,6 +289,27 @@ func _test_nenhum_pe_atravessa_a_lona() -> void:
 			pior = minf(pior, l.pe_mais_baixo())
 		_ok(pior >= -0.001,
 			"na reação a um golpe de %.2f o pé afundou %.3f m na lona" % [forca, pior])
+	# E AGORA O TOMBO TAMBÉM. Era o único movimento que passava por cima
+	# da regra: o nocaute pedia 34 cm de queda sem saber que o desenho
+	# dele já começa 21 cm acima do chão, e os 12 cm que sobravam iam
+	# parar debaixo do tapete. Com a trava medindo a base da POSE ATUAL,
+	# o corpo desce até encostar e para ali.
+	l.preparar()
+	l.bater(1.0, true, 9600)
+	var pior_no_tombo := 0.0
+	for i in range(400):
+		l.atualizar(1.0 / 60.0)
+		pior_no_tombo = minf(pior_no_tombo, l.pe_mais_baixo())
+	_ok(pior_no_tombo >= -0.001,
+		"no nocaute o desenho afundou %.3f m na lona" % pior_no_tombo)
+	# E o tombo ainda derruba de verdade: travar não pode ter virado
+	# um nocaute em que o corpo não desce.
+	l.preparar()
+	l.bater(1.0, true, 9600)
+	_correr(l, 130)
+	_ok(l.fundura_do_tombo() > 0.85,
+		"o corpo ainda tem de descer até a lona (desceu %.2f)" % l.fundura_do_tombo())
+	l.preparar()
 	# O cambaleio é o caso que originou a queixa: confere também que ele
 	# ainda INCLINA — travar o pé não pode ter deixado o corpo rígido.
 	_ok(Lutador3D.giro_do_cambaleio() > 0.02,

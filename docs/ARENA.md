@@ -218,6 +218,48 @@ tombo**: um corpo que desce 34 cm passa a ser atravessado por ela, e um
 corpo caído já está no tapete — não precisa de mancha para dizer que
 encostou.
 
+**Nada pode cortar o lutador — e isso é uma propriedade, não um
+ajuste.** Três correções seguidas tentaram acertar a distância entre o
+desenho e o tapete: o miolo levantado da lona, a borda do texel, a
+altura da sombra. Cada uma consertava um caso e sobrava um fio de
+corte, porque o problema não era o número — era **haver um plano com
+poder de cortar o lutador**.
+
+O desenho agora tem `no_depth_test`: nenhum plano da arena é testado
+contra ele. Não há nada que deva passar à frente dele (as cordas da
+frente não são desenhadas de propósito, os postes da frente ficam fora
+do enquadramento, o tapete está embaixo), então a classe inteira do
+problema sai do caminho em vez de mais um caso dela.
+
+O outro lado é garantido por `_com_o_desenho_na_lona`: **nenhuma parte
+do desenho passa abaixo da lona, em pose nenhuma, em instante nenhum**.
+A trava mede a base da *pose atual* — `BASE_DA_POSE`, nove números
+medidos na folha — depois de toda a conta de movimento. Isso fechou o
+último buraco: o tombo do nocaute pedia 34 cm de queda sem saber que o
+desenho dele já começa 21 cm acima do chão, e os 12 cm que sobravam
+iam para debaixo do tapete. Agora o corpo desce até **encostar** e para
+ali.
+
+**A definição sobe em degraus, e quem decide é o vigia de desempenho.**
+A arena não tem antisserrilhado nenhum — MSAA desligado, e o recorte do
+lutador é por limiar de alfa, que é decisão de tudo-ou-nada: a silhueta
+sai em degraus de um bit. Num quadro de 688 × 770 esses degraus têm o
+tamanho de um pixel e se veem. Não é falta de pixels na tela; é falta
+de **amostras por pixel**.
+
+| degrau | janela | custo |
+| --- | --- | --- |
+| nítido | 1376 × 1540 | 4× — cada pixel final é a média de quatro amostras |
+| cheio | 688 × 770 | 1× — um para um com o buraco |
+| magro | 482 × 539 | 0,49× |
+
+A redução de 1376 para 688 é exatamente 2:1, então o filtro bilinear do
+desenho vira um filtro de caixa de quatro amostras: antisserrilha o
+ringue, as cordas, as faíscas e o contorno do lutador, sem depender de
+MSAA nem de recurso que a TV Box possa não ter. A escada tem histerese
+(sobe em 0,95, desce em 0,85) porque trocar o tamanho de um
+`SubViewport` realoca a textura — não pode acontecer a cada quadro.
+
 **A janela 3D tem o tamanho exato do buraco da moldura.** Ela era
 640 × 717 e era desenhada num buraco de 688 × 770: a proporção batia,
 então nada parecia errado, mas havia um esticão de 1,075× em cima da
