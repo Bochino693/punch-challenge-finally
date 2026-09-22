@@ -182,8 +182,13 @@ function Erros-Do-Godot() {
             $tudo += Get-Content -LiteralPath $arquivo -ErrorAction SilentlyContinue
         }
     }
+    # AS LINHAS DE PROGRESSO FICAM DE FORA. Elas comecam com "[  n% ]" e
+    # sao centenas; pior, muitas contem a palavra "error" -- no nome do
+    # arquivo `error.wav`. O filtro antigo casava com elas e mostrava
+    # quatro linhas de audio como se fossem o defeito.
     return $tudo | Where-Object {
-        $_ -match "ERROR|ERRO|error:|Erro|falh|fail|not found|nao encontrad|n.o encontrad|rcedit|template|Cannot|Unable"
+        ($_ -notmatch '^\s*\[') -and
+        ($_ -match "ERROR|WARNING|SCRIPT ERROR|rcedit|template|Cannot|Unable|Failed|No export|Missing|Invalid")
     }
 }
 
@@ -215,7 +220,19 @@ function Exportar([bool]$comRecursos) {
         [System.IO.File]::WriteAllText($presetArquivo, $texto)
     }
     try {
-        return Invocar-Godot @("--headless", "--path", $raiz, "--export-release", $Preset)
+        # O CAMINHO DE SAIDA E OBRIGATORIO, e faltava.
+        #
+        # A documentacao do Godot 4 e explicita: a forma e
+        # `--export-release <preset> <caminho>`, com DOIS argumentos. Usar
+        # o `export_path` gravado no preset quando o caminho e omitido e
+        # uma PROPOSTA aberta no projeto (godot-proposals#774), nao o
+        # comportamento atual.
+        #
+        # Sem o segundo argumento o Godot abria o projeto, empacotava
+        # tudo (por isso o savepack ia a 100%), saia com codigo 0 e nao
+        # escrevia nada no destino. "Terminou sem erro e a pasta esta
+        # vazia" era literalmente isso: nunca houve destino.
+        return Invocar-Godot @("--headless", "--path", $raiz, "--export-release", $Preset, $exeFinal)
     } finally {
         if ($null -ne $original) {
             [System.IO.File]::WriteAllText($presetArquivo, $original)
@@ -239,13 +256,29 @@ function Antivirus-Reclamou() {
     } catch { return $null }
 }
 
+$jaDiagnosticou = $false
+
 function Mostrar-Diagnostico() {
+    if ($script:jaDiagnosticou) { return }
+    $script:jaDiagnosticou = $true
     $erros = Erros-Do-Godot
     if ($erros) {
         Write-Host "    o Godot reclamou disto:" -ForegroundColor Yellow
         foreach ($linha in ($erros | Select-Object -First 12)) { Write-Host "      $linha" }
     } else {
-        Write-Host "    o Godot nao imprimiu erro nenhum (log em $logSaida)."
+        Write-Host "    o Godot nao imprimiu erro nenhum."
+    }
+    # E O FIM DO LOG, SEMPRE. Um filtro pode nao casar com a linha que
+    # importa; as ultimas linhas do log sao o que o Godot estava fazendo
+    # quando parou, e isso nunca engana.
+    Write-Host "    ultimas linhas do log:"
+    foreach ($arquivo in @($logSaida, $logErro)) {
+        if (-not (Test-Path -LiteralPath $arquivo)) { continue }
+        $fim = Get-Content -LiteralPath $arquivo -Tail 12 -ErrorAction SilentlyContinue
+        if ($fim) {
+            Write-Host "      --- $(Split-Path -Leaf $arquivo)"
+            foreach ($linha in $fim) { Write-Host "      $linha" }
+        }
     }
     Write-Host "    o que existe na pasta agora:"
     $existe = Get-ChildItem -Path $saida -Recurse -File -ErrorAction SilentlyContinue
@@ -272,13 +305,16 @@ $codigo = Exportar $true
 if (-not (Test-Path -LiteralPath $exeFinal)) {
     Aviso "o Godot terminou (codigo $codigo) e nao escreveu PunchChallenge.exe."
     Mostrar-Diagnostico
-    if (Test-Path -LiteralPath $pckFinal) {
-        # O .pck NO LUGAR e o .exe AUSENTE e a assinatura do rcedit: o
-        # Godot chegou a empacotar tudo e so tropecou na hora de gravar
-        # icone e versao no executavel.
-        Passo "tentando de novo SEM gravar icone e versao no .exe (dispensa o rcedit)"
-        $codigo = Exportar $false
-    }
+    # A SEGUNDA TENTATIVA VALE SEMPRE, e nao so quando o .pck aparece.
+    #
+    # Ela ja foi condicionada a "o .pck esta la e o .exe nao", por eu
+    # supor que o rcedit fosse a causa. Nao era -- a pasta estava vazia,
+    # sem .pck nenhum --, e a condicao impediu a tentativa de acontecer.
+    # Uma segunda tentativa custa vinte segundos e nao pode depender de
+    # eu ter adivinhado a causa certa.
+    Passo "tentando de novo SEM gravar icone e versao no .exe (dispensa o rcedit)"
+    $codigo = Exportar $false
+    $script:jaDiagnosticou = $false
 }
 
 if (-not (Test-Path -LiteralPath $exeFinal)) {
