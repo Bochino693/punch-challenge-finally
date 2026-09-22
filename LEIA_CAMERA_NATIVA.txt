@@ -1,0 +1,69 @@
+CAMERA NATIVA - WINDOWS - GODOT 4.6
+
+Esta versao nao usa Python nem OpenCV para a camera.
+
+COMO FUNCIONA
+- O jogo usa Windows Media Foundation por uma extensao nativa incluida.
+- Basta conectar uma webcam USB e abrir o jogo.
+- Se conectar depois, aguarde ate 2,5 segundos ou use F9 > PROCURAR DE NOVO.
+- A previa permanece ao vivo. Somente a foto escolhida fica congelada.
+- O diagnostico (F9) le dispositivo e privacidade com reg.exe, tasklist.exe
+  e pnputil.exe, que ja vem no Windows. Nada disso abre a webcam.
+
+POR QUE A CAMERA "NAO FUNCIONA EM OUTRO PC"
+Este e o motivo de quase todos os casos, inclusive notebook que ja tem
+camera embutida:
+
+  O GODOT NAO TEM SUPORTE DE CAMERA NO WINDOWS.
+
+Nao e configuracao. O CameraServer do motor so existe em Linux, macOS,
+Android e iOS. No Windows ele devolve lista VAZIA para sempre, com ou sem
+webcam. Por isso a camera deste jogo depende INTEIRAMENTE da extensao
+nativa libcameraserver-extension.windows.dll. Sem ela nao ha camera
+nenhuma - nem a do notebook.
+
+E ela se perde facil, por tres motivos, nesta ordem:
+
+  1. COPIARAM SO O .EXE. O .pck esta embutido no executavel, entao o EXE
+     PARECE bastar. Mas biblioteca nativa nao entra no .pck: o Godot a
+     exporta como arquivo solto AO LADO do executavel. Copiar so o EXE
+     deixa a DLL para tras e o jogo abre normal, sem camera e sem erro.
+  2. FALTA O VISUAL C++ 2015-2022 REDISTRIBUTABLE x64. A DLL e compilada
+     com MSVC; sem o redistributable o Windows nem carrega o arquivo, e
+     o sintoma e identico ao item 1.
+  3. WINDOWS ARM64 (Snapdragon). A extensao so traz x86_64.
+
+COMO CONFERIR EM DEZ SEGUNDOS
+Abra F9 > CAMERA E SOM. A linha EXTENSAO NATIVA DA CAMERA diz tudo:
+  CARREGADA ....... a extensao esta no ar; se nao ha imagem, o problema
+                    e a webcam, a privacidade do Windows ou outro
+                    programa usando a camera. Use DIAGNOSTICAR.
+  NAO CARREGOU .... e um dos tres casos acima. Nenhuma webcam vai
+                    aparecer enquanto isso nao for resolvido.
+Com a camera exigida, o aviso tambem aparece no rodape da tela do jogo.
+
+COMO LEVAR PARA OUTRO PC
+1. Abra o projeto no Godot 4.6.
+2. Exporte com o preset Windows Desktop x86_64.
+3. Copie a PASTA EXPORTADA INTEIRA, e nao apenas o arquivo EXE.
+   Confira que estes arquivos foram junto, ao lado do .exe:
+     libcameraserver-extension.windows.dll   (camera)
+     gdserial.dll                            (Arduino)
+   Sem o primeiro nao ha camera; sem o segundo nao ha sensor.
+3b. Instale o Visual C++ 2015-2022 Redistributable x64 na maquina nova.
+4. Conecte a camera e o Arduino antes de abrir o jogo.
+
+ARQUIVOS NATIVOS IMPORTANTES
+- Camera: libcameraserver-extension.windows.dll
+- Arduino: gdserial.dll
+
+ARDUINO
+Os fontes do firmware, o protocolo serial, os scripts serial e o addon
+gdserial nao foram alterados nesta mudanca.
+
+TESTE RAPIDO
+1. Pressione F9.
+2. A Central deve mostrar CAMERA CONECTADA - VIDEO AO VIVO.
+3. Mexa-se na frente da camera: a previa deve ficar lisa e continua.
+4. Use TESTAR FOTO: apenas o retrato deve congelar brevemente.
+5. Se necessario, use DIAGNOSTICAR e depois RESOLVER ACESSO.

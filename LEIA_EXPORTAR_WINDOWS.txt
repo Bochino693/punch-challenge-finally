@@ -1,0 +1,28 @@
+PUNCH CHALLENGE — EXPORTAÇÃO WINDOWS
+
+1. Feche o Godot.
+2. Extraia este pacote em uma pasta NOVA e vazia.
+3. Abra o project.godot dessa pasta.
+4. Confirme em Editor > Gerenciar modelos de exportação que os modelos
+   instalados correspondem exatamente à versão do Godot aberta.
+5. Para garantir que câmera e sensor sejam copiados, execute no PowerShell:
+
+     powershell -ExecutionPolicy Bypass -File tools/exportar_windows.ps1
+
+   O script exporta, copia as DLLs para os caminhos esperados, confere todos
+   os arquivos e cria build/PunchChallenge-Windows-x64.zip.
+
+O jogo sai como uma PASTA. Abra `PunchChallenge.exe`, mas mantenha junto dele
+`PunchChallenge.pck` e as DLLs exportadas. O PCK separado evita por completo a
+etapa do Godot que estava retornando "Cabeçalho do arquivo executável
+corrompido".
+
+O ícone Windows usa assets/icon.png. O próprio Godot 4 converte esse PNG
+para o recurso do executável; não selecione manualmente assets/icon.ico.
+
+O destino padrão é build/windows/PunchChallenge.exe.
+
+Com `binary_format/embed_pck=false`, a etapa de incorporação não é executada.
+Se a mensagem ainda aparecer, o editor está usando uma cópia antiga do preset:
+feche o Godot, apague a pasta `.godot` do projeto antigo e abra somente este
+novo `project.godot`.

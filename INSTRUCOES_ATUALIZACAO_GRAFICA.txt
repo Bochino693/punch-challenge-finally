@@ -1,0 +1,36 @@
+O LUTADOR AGORA E DESENHADO
+===========================
+
+O adversario da arena deixou de ser um corpo montado por codigo e passou
+a ser uma folha de nove ilustracoes:
+
+    assets/personagem/sprites/lutador_folha_3x3.png
+    assets/personagem/sprites/lutador_sprite_frames.tres
+
+O jogo carrega isso sozinho ao subir a arena. Nao ha nada a instalar, nem
+Python, nem Blender, nem passo manual: abrir o projeto no Godot 4 e rodar
+basta.
+
+O QUE MUDOU
+- o corpo procedural (aneis torneados, musculo modelado, sombreador de
+  desenho) foi APAGADO junto com os dois shaders dele. Ele funcionava e
+  custava onze chamadas de desenho, mas geometria feita de elipsoides
+  somados tem um teto de qualidade, e esse teto fica abaixo de uma
+  ilustracao;
+- o lutador continua DENTRO do mundo 3D, e nao numa camada por cima: o
+  ringue, a perspectiva, o tremor, as particulas, a luz ciano e magenta e
+  a camera que recua no impacto continuam valendo;
+- as nove poses sao desenhos parados. O que as faz mexer e o movimento
+  procedural em scripts/arena/lutador.gd: respiracao, recuo do golpe,
+  cambaleio, tombo, clarao e o tom que escurece conforme o dano;
+- a camera foi reenquadrada duas vezes: de pe ela afastou para a figura
+  caber inteira, e no nocaute ela AFASTA e baixa em vez de aproximar,
+  porque um corpo caido e largo.
+
+TROCAR A ARTE
+Substitua a folha e o .tres mantendo os nove nomes de pose: guarda, idle,
+preparado, jab, direto, impacto_corpo, impacto_forte, nocaute e
+recuperacao. O teste tests/test_arena.gd falha se faltar algum.
+
+CONFERIR
+    godot --headless --path . --script tests/test_arena.gd

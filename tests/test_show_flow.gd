@@ -1,0 +1,885 @@
+extends SceneTree
+
+## Testes de fluxo: abre a cena de verdade e dirige a máquina de estados.
+## Prova as regras que valem dinheiro — crédito, golpe válido, foto.
+##
+## LEIA O `SHOW_FLOW_OK` COM DESCONFIANÇA, E OLHE O ERRO PADRÃO JUNTO.
+##
+## `assert()` neste arranjo (`--headless --script`) IMPRIME a falha e
+## SEGUE EM FRENTE: não derruba o processo e não muda o código de saída.
+## Ou seja, este arquivo já imprimiu `SHOW_FLOW_OK` durante muito tempo
+## enquanto falhava — e foi assim que se acumulou a impressão de que o
+## projeto estava testado. Quem rodar isto precisa conferir que NÃO há
+## nenhuma linha `SCRIPT ERROR` na saída; só as duas coisas juntas são
+## um teste verde.
+##
+## Três testes saíram daqui porque exercitavam código que NÃO EXISTE mais
+## no jogo: a simulação por barra de espaço (`_apertou_espaco`,
+## `_soltou_espaco`, `carga_tempo`, `simulacao_bancada`,
+## `simulacao_escolhida`) e o botão "simulacao" da Central. Eles falhavam
+## em silêncio a cada rodada.
+
+class FakeCamera extends CameraService:
+	var shots := 0
+	func _ready() -> void:
+		pass
+	func capture_photo() -> String:
+		shots += 1
+		return ""
+
+class FakeSerial extends SerialLink:
+	var aberta := true
+	var enviadas: Array[String] = []
+	func available() -> bool: return true
+	func is_open() -> bool: return aberta
+	func close_port() -> void: aberta = false
+	func nome_do_caminho() -> String: return SerialLink.CAMINHO_NATIVO
+	func send_line(line: String) -> bool:
+		enviadas.append(line)
+		return true
+
+## `arcade_stage.gd` não tem `class_name` — ele é carregado por preload
+## em quem o usa. Aqui vale o mesmo caminho, e não um nome global.
+const ArcadeStage = preload("res://scripts/presentation/arcade_stage.gd")
+
+var jogo: Control
+
+func _initialize() -> void:
+	call_deferred("run")
+
+func run() -> void:
+	jogo = load("res://scenes/main.tscn").instantiate()
+	root.add_child(jogo)
+	await process_frame
+	jogo.set_process(false)
+	# Todo fluxo de produção agora exige placa + MPU + sinal recente. A
+	# suíte usa uma conexão explícita de bancada; nenhum teste ganha START
+	# apenas por ter desligado a exigência da câmera.
+	jogo._soltar_link()
+	jogo.link = FakeSerial.new()
+	jogo.porta_atual = "COMTESTE"
+	_sensor_pronto()
+	# A máquina de testes nunca é a de um salão: sem Central aberta, para
+	# as regras de produção valerem.
+	#
+	# `simulacao_bancada` e `simulacao_por_ambiente` SAÍRAM DAQUI porque
+	# NÃO EXISTEM neste projeto -- nem em main.gd nem em nenhum outro
+	# script. Atribuir propriedade inexistente num `Control` não é erro de
+	# compilação: falha em tempo de execução, e falhava JÁ NA TERCEIRA
+	# LINHA deste arquivo. Ou seja, este teste não chegava a exercitar
+	# nada, e passava a impressão contrária por nunca ter sido rodado até
+	# o fim. Quem liberar a simulação de bancada de novo, use
+	# `_simulador_liberado()`, que é o que o jogo de fato consulta.
+	jogo.central_aberta = false
+	# A EXIGÊNCIA DE CÂMERA É REAL E FICA DESLIGADA AQUI — de propósito.
+	#
+	# A máquina passou a recusar a rodada enquanto não há imagem ao vivo
+	# (e a não cobrar a ficha por ela). É a regra certa no salão e a
+	# errada numa bancada de teste sem webcam: com ela ligada, todo teste
+	# de crédito, golpe e placar mediria a câmera em vez do que se propõe
+	# a medir. Quem prova a regra nova é `_test_camera_manda_na_rodada`,
+	# e só ele a liga.
+	jogo.camera_obrigatoria = false
+
+	_test_entrada()
+	_test_audio_dos_estados()
+	await _test_foto_antes_de_armar()
+	_test_hit_so_em_armed()
+	_test_um_golpe_por_rodada()
+	_test_start_e_credito_independentes()
+	_test_timeout_devolve_credito()
+	_test_quatro_digitos()
+	_test_medico_da_camera()
+	_test_a_camera_diz_quando_falta_a_extensao()
+	_test_captura_nativa_sem_ponte()
+	_test_diagnostico_nao_interrompe_video()
+	_test_camera_acesa_nao_apaga()
+	_test_camera_manda_na_rodada()
+	_test_contagem_espera_a_camera()
+	_test_laco_de_atracao()
+	_test_teto_de_efeitos()
+	_test_vigia_mede_o_pior_quadro()
+	_test_todas_as_camadas_andam_no_mesmo_relogio()
+	_test_porta_fixa()
+	_test_botoes_do_arduino_ponta_a_ponta()
+	await _test_ponte_por_processo()
+	_test_rolagem_da_central()
+	_test_obturador_da_pose()
+
+	jogo.queue_free()
+	await process_frame
+	print("SHOW_FLOW_OK")
+	quit(0)
+
+func _sensor_pronto() -> void:
+	jogo.placa_respondeu = true
+	jogo.sensor_presente = true
+	jogo.firmware_optico_identificado = true
+	jogo.ultimo_sinal_ms = Time.get_ticks_msec()
+
+# ------------------------------------------------------------ entrada
+func _test_entrada() -> void:
+	assert(jogo.intro_active)
+	assert(ArcadeStage.MORPH_SECONDS >= 0.5)
+	jogo._processar_abertura(ArcadeStage.INTRO_SECONDS + 0.1)
+	assert(not jogo.intro_active)
+	assert(is_equal_approx(jogo.abertura_chegada, 1.0))
+	assert(jogo.state_time >= 0.5) # Não apaga o título depois do pouso.
+	assert(jogo._titulo_da_abertura_visivel())
+	for pagina in [1, 2]:
+		jogo.state_time = jogo.ABERTURA_DURACAO * pagina
+		assert(not jogo._titulo_da_abertura_visivel())
+	jogo.state_time = 0.5
+	assert(jogo.state == GameDef.State.IDLE)
+
+func _test_audio_dos_estados() -> void:
+	for som in ["music", "charge", "score_loop"]:
+		assert(jogo.sons._players[som].stream.loop_mode == AudioStreamWAV.LOOP_FORWARD)
+	assert(jogo.sons._players["round_bell"].stream != null)
+	# Os oito níveis existem como som carregado, e não só como nome.
+	for nivel in ScoreTier.NIVEIS:
+		var player: AudioStreamPlayer = jogo.sons._players.get(str(nivel["som"]))
+		assert(player != null and player.stream != null)
+	jogo.sons.music(-19.0)
+	assert(jogo.sons._players["music"].playing)
+
+# -------------------------------------------------------------- foto
+func _test_foto_antes_de_armar() -> void:
+	jogo.camera_service.queue_free()
+	var camera := FakeCamera.new()
+	jogo.add_child(camera)
+	jogo.camera_service = camera
+	jogo.state = GameDef.State.COUNTDOWN
+	jogo.countdown_left = 3.0
+	jogo.pose_finished = false
+	jogo._processar_contagem(2.0)
+	assert(camera.shots == 0)
+	jogo._processar_contagem(1.0)
+	# A foto sai DURANTE a contagem, antes de o sensor armar, e uma só.
+	assert(camera.shots == 1)
+	assert(jogo.state == GameDef.State.COUNTDOWN)
+	jogo._processar_contagem(1.3)
+	assert(jogo.state == GameDef.State.ARMED)
+	assert((jogo.link as FakeSerial).enviadas.has("ARM"))
+	assert(camera.shots == 1)
+	await process_frame
+
+# -------------------------------------------------------------- golpe
+func _golpe(velocidade: float) -> Dictionary:
+	return {"speed": velocidade, "accel": 9.0, "duration_ms": 45.0, "axis": "X"}
+
+func _test_hit_so_em_armed() -> void:
+	for estado in [GameDef.State.IDLE, GameDef.State.COUNTDOWN, GameDef.State.RESULT]:
+		jogo.state = estado
+		jogo.result_score = 0
+		jogo.golpe_registrado = false
+		jogo.ultimo_golpe_ms = jogo.NUNCA_MS
+		jogo._receber_hit(_golpe(12.0))
+		assert(jogo.result_score == 0)
+		assert(jogo.state == estado)
+
+## UM GOLPE POR TENTATIVA (o rebote do saco não pode virar um segundo).
+func _test_um_golpe_por_rodada() -> void:
+	_armar()
+	jogo._receber_hit(_golpe(10.0))
+	assert(jogo.state == GameDef.State.MEASURING)
+	assert(is_equal_approx(float(jogo.socos[0]["pico_g"]), 9.0))
+	assert(is_equal_approx(float(jogo.socos[0]["duracao_ms"]), 45.0))
+	var primeiro: int = jogo.result_score
+	assert(primeiro > 0)
+	# O saco balança depois do golpe: o segundo evento não pode entrar.
+	jogo.state = GameDef.State.ARMED
+	jogo._receber_hit(_golpe(14.0))
+	assert(jogo.result_score == primeiro)
+	# QUEM JULGA A FÍSICA É A PLACA, E ESTE TESTE MUDOU POR ISSO.
+	#
+	# Aqui se exigia que o jogo recusasse um evento de 3 ms e um de 0,2 g.
+	# Ele recusava — repetindo, com números guardados no disco, a mesma
+	# validação que o firmware já faz. Dois juízes para o mesmo julgamento,
+	# e o segundo capaz de discordar do primeiro para sempre: foi assim
+	# que um `sensor_amin` envenenado por uma calibração ruim passou a
+	# recusar, em silêncio, golpes que a placa tinha aprovado.
+	#
+	# Agora o jogo confia no HIT e só decide SE ELE CONTA AGORA. Os
+	# eventos abaixo nem existem na prática: o firmware não emite HIT com
+	# menos de 14 ms nem com pico abaixo do gatilho. O que continua sendo
+	# regra do jogo é o que se testa acima — um golpe por tentativa, e o
+	# tempo morto do rebote.
+
+func _armar() -> void:
+	jogo.state = GameDef.State.ARMED
+	jogo.golpe_registrado = false
+	jogo.ultimo_golpe_ms = jogo.NUNCA_MS
+	jogo.result_score = 0
+	# RODADA LIMPA, e não só tentativa limpa. Desde os dois socos por
+	# rodada, `socos` decide coisas de dinheiro — entre elas se a ficha
+	# volta quando a espera acaba. Um teste que herdasse os socos do teste
+	# anterior provaria outra coisa que não a que diz provar.
+	jogo.socos.clear()
+
+
+# ------------------------------------------------- START e CRÉDITO
+func _test_start_e_credito_independentes() -> void:
+	_sensor_pronto()
+	# Os dois nunca podem ser o mesmo aperto.
+	assert(int(jogo.botao_start["index"]) != int(jogo.botao_credito["index"]))
+	jogo._entrar_em_abertura()
+	jogo.game_mode = "credit"
+	jogo.credits = 0
+	# START sem saldo não inicia rodada nenhuma.
+	jogo._pressionou_start()
+	assert(jogo.state == GameDef.State.IDLE)
+	assert(jogo.credits == 0)
+	# CRÉDITO soma exatamente um.
+	jogo._add_credit()
+	assert(jogo.credits == 1)
+	# E o antirrepique impede o aperto duplicado do botão físico.
+	jogo.ultimo_credito_ms = Time.get_ticks_msec()
+	var repique := InputEventJoypadButton.new()
+	repique.button_index = int(jogo.botao_credito["index"])
+	repique.pressed = true
+	jogo._botao_do_gabinete(repique)
+	assert(jogo.credits == 1)
+	# START consome exatamente um.
+	jogo._pressionou_start()
+	assert(jogo.state == GameDef.State.COUNTDOWN)
+	assert(jogo.credits == 0)
+	assert(jogo.credito_gasto)
+
+## A ESPERA QUE ACABA SEM NENHUM SOCO DEVOLVE A FICHA.
+## O caso oposto — espera acabando com um soco já dado — está em
+## `tests/test_dois_socos.gd`, junto do resto da rodada de dois golpes.
+func _test_timeout_devolve_credito() -> void:
+	jogo.state = GameDef.State.ARMED
+	jogo.socos.clear()
+	jogo.espera_left = 0.05
+	jogo.credito_gasto = true
+	jogo.game_mode = "credit"
+	var antes: int = jogo.credits
+	jogo._processar_armado(0.1)
+	assert(jogo.credits == antes + 1)
+	assert(jogo.state == GameDef.State.IDLE)
+	# E a ficha devolvida não volta duas vezes.
+	jogo._devolver_credito()
+	assert(jogo.credits == antes + 1)
+
+# ------------------------------------------------- quatro dígitos
+func _test_quatro_digitos() -> void:
+	assert(("%04d" % GameDef.SCORE_MAX).length() == 4)
+	assert(("%04d" % 0) == "0000")
+	jogo.ranking = RankingStore.migrate([9999, 5000, 120])
+	assert(RankingStore.best(jogo.ranking) == 9999)
+	jogo.state = GameDef.State.RESULT
+	jogo.result_score = 9999
+	jogo.verdict_time = 1.0
+	jogo.displayed_score = 9999.0
+	jogo.central_aberta = false
+	jogo.queue_redraw()
+
+
+# ------------------------------------------- médico da câmera
+## O DIAGNÓSTICO TEM DE AGIR, e não só relatar.
+##
+## Um relatório que exige o técnico repetir à mão o que a máquina acabou
+## de descobrir é meio relatório: achou câmera no índice 2, a máquina
+## passa a usar o índice 2 sozinha.
+func _test_a_camera_diz_quando_falta_a_extensao() -> void:
+	"""No Windows o Godot NAO TEM camera propria.
+
+	`CameraServer` so e implementado em Linux, macOS, Android e iOS. No
+	Windows `feeds()` devolve lista vazia para sempre, haja webcam ou nao
+	-- entao a camera do jogo depende inteiramente da extensao nativa.
+
+	Quando a DLL fica para tras (copiaram so o .exe, falta o VC++, maquina
+	ARM), a tela dizia "CONECTE UMA CAMERA USB". Isso e uma acusacao falsa:
+	manda procurar hardware quando o problema e um arquivo, e foi por isso
+	que "nao funciona em outras maquinas, mesmo notebook com camera" ficou
+	sem resposta. A mensagem tem de apontar o arquivo.
+	"""
+	var servico: CameraService = jogo.camera_service
+	assert(servico != null)
+	# A pergunta existe e responde sem depender de plataforma.
+	assert(servico.has_method("extensao_nativa_presente"))
+	var presente: bool = servico.extensao_nativa_presente()
+	assert(presente == ClassDB.class_exists(&"CameraServerExtension"))
+
+	# E o diagnostico so acusa a falta onde ela realmente impede tudo.
+	var motivo: String = servico._diagnostico_da_plataforma()
+	if OS.get_name() == "Windows" and not presente:
+		assert(not motivo.is_empty())
+		assert("CÂMERA INDISPONÍVEL" in motivo)
+		assert("USB" in motivo)
+	else:
+		assert(motivo.is_empty())
+
+func _test_medico_da_camera() -> void:
+	assert(jogo.medico != null)
+	assert(not jogo.medico.rodando)
+
+	# Achou câmera: a máquina adota o índice e reabre.
+	jogo.camera_service.selected_index = 0
+	# `assign`, e não `=`: `indices` é Array[int] tipado, e atribuir um
+	# literal solto de fora deixa a lista vazia em silêncio.
+	jogo.medico.indices.assign([2])
+	jogo.medico.backend = "MEDIA FOUNDATION"
+	jogo._fim_do_exame()
+	assert(jogo.camera_service.selected_index == 2)
+	jogo.medico.indices.clear()
+	jogo.medico.backend = ""
+
+	# O VEREDITO MUDA COM O QUE SE DESCOBRIU. Uma frase única para todos
+	# os casos ("feche o Teams") é o que fazia o operador tentar sempre a
+	# mesma coisa e concluir que o botão não funciona.
+	jogo.medico.cameras_do_windows = 0
+	assert("cabo" in jogo.medico._veredito())
+
+	jogo.medico.cameras_do_windows = 1
+	jogo.medico.privacidade = "Deny"
+	assert("PRIVACIDADE" in jogo.medico._veredito())
+
+	jogo.medico.privacidade = "Allow"
+	jogo.medico.ocupantes = "WindowsCamera, Teams"
+	assert("WindowsCamera" in jogo.medico._veredito())
+
+	jogo.medico.ocupantes = "nenhum"
+	assert("MEDIA FOUNDATION" in jogo.medico._veredito().to_upper())
+
+	jogo.medico.cameras_do_windows = -1
+	jogo.medico.privacidade = ""
+	jogo.medico.ocupantes = ""
+
+	# Sem quadro nenhum, a idade é grande — e é ela que impede a máquina
+	# de anunciar "FOTO OK" para uma imagem congelada.
+	assert(jogo.camera_service.idade_do_quadro() > 2000)
+
+# --------------------------------------------------- rolagem da Central
+func _test_rolagem_da_central() -> void:
+	# Com a página curta não há barra e não há rolagem: rolar uma página
+	# que já cabe inteira é o defeito que faz o conteúdo "sumir" para
+	# cima sem nada abaixo para mostrar.
+	jogo.central_fundo = 900.0
+	assert(jogo._rolagem_maxima() == 0.0)
+	jogo._rolar(500.0)
+	assert(jogo.central_rolagem == 0.0)
+
+	# Página comprida: rola, e para no fim.
+	jogo.central_fundo = 2400.0
+	var teto: float = jogo._rolagem_maxima()
+	assert(teto > 0.0)
+	jogo._rolar(1000000.0)
+	assert(is_equal_approx(jogo.central_rolagem, teto))
+	jogo._rolar(-1000000.0)
+	assert(jogo.central_rolagem == 0.0)
+
+	# O CLIQUE ACOMPANHA O PAPEL. Um controle de página desce com a
+	# rolagem; os três de fora (fechar, restaurar, salvar) não saem do
+	# lugar. Sem essa distinção, rolar faria o clique acertar outro botão.
+	jogo.central_pagina = 0
+	jogo.central_rolagem = 0.0
+	var alvo: Rect2 = jogo.BOTOES_SIMPLES["modo_livre"]
+	var meio := alvo.position + alvo.size * 0.5
+	assert(jogo._tocou("modo_livre", meio))
+	jogo.central_rolagem = 120.0
+	assert(not jogo._tocou("modo_livre", meio))
+	assert(jogo._tocou("modo_livre", meio - Vector2(0.0, 120.0)))
+	var fixo: Rect2 = jogo.BOTOES_SIMPLES["salvar"]
+	assert(jogo._tocou("salvar", fixo.position + fixo.size * 0.5))
+
+	# Controle de outra página não responde, rolado ou não.
+	assert(not jogo._tocou("calibrar", meio))
+	jogo.central_rolagem = 0.0
+
+# ------------------------------------------------- obturador da pose
+func _test_obturador_da_pose() -> void:
+	var camera: CameraService = jogo.camera_service
+	camera.abrir_obturador(5000)
+
+	# Um quadro de uma cor só não é imagem: é buffer não inicializado,
+	# tampa na lente ou feed que ativou sem entregar nada. Era isto que
+	# fazia a máquina fotografar um quadrado preto e chamar de foto.
+	var preto := Image.create(64, 48, false, Image.FORMAT_RGB8)
+	preto.fill(Color.BLACK)
+	assert(not camera._imagem_util(preto))
+	camera._oferecer_ao_obturador(preto)
+
+	# Um quadro com contraste entra e vira o melhor.
+	var cena := Image.create(64, 48, false, Image.FORMAT_RGB8)
+	cena.fill(Color(0.2, 0.2, 0.2))
+	for x in range(64):
+		for y in range(24):
+			cena.set_pixel(x, y, Color.WHITE)
+	camera._oferecer_ao_obturador(cena)
+	assert(camera._melhor_imagem != null)
+	var nota_boa: float = camera._melhor_nota
+	assert(nota_boa > camera.CONTRASTE_MINIMO)
+
+	# Um quadro pior não substitui o guardado.
+	var fraco := Image.create(64, 48, false, Image.FORMAT_RGB8)
+	fraco.fill(Color(0.5, 0.5, 0.5))
+	camera._oferecer_ao_obturador(fraco)
+	assert(is_equal_approx(camera._melhor_nota, nota_boa))
+
+	# Fechado o obturador, nada mais entra.
+	camera._obturador_ate_ms = 0
+	var outro := Image.create(64, 48, false, Image.FORMAT_RGB8)
+	outro.fill(Color.WHITE)
+	for x in range(64):
+		outro.set_pixel(x, 0, Color.BLACK)
+	camera._oferecer_ao_obturador(outro)
+	assert(is_equal_approx(camera._melhor_nota, nota_boa))
+	camera._melhor_imagem = null
+	camera._melhor_nota = -1.0
+
+# ------------------------------- captura nativa, sem processo auxiliar
+func _test_captura_nativa_sem_ponte() -> void:
+	assert(not FileAccess.file_exists("res://tools/camera_bridge.py"))
+	assert(ClassDB.class_exists(&"CameraServerExtension"))
+
+# O diagnóstico PowerShell só consulta o Windows. Ele não derruba a textura
+# nem toma a webcam do backend Media Foundation.
+func _test_diagnostico_nao_interrompe_video() -> void:
+	var camera: CameraService = jogo.camera_service
+	camera.estado = camera.Estado.ACESA
+	camera._sessao_aprovada = true
+	var estado_antes: int = camera.estado
+	camera.entregar_ao_exame()
+	assert(camera.estado == estado_antes)
+	assert(camera._sessao_aprovada)
+
+## UM QUADRO DIFERENTE A CADA CHAMADA.
+##
+## O serviço agora prova a vida da câmera comparando a assinatura de um
+## quadro com a do anterior — dois quadros idênticos são buffer morto, e
+## não câmera. Um teste que oferecesse sempre a mesma imagem estaria
+## fingindo justamente o defeito que o código passou a detectar.
+func _quadro_vivo(semente: int) -> Image:
+	var imagem := Image.create(64, 48, false, Image.FORMAT_RGB8)
+	imagem.fill(Color(0.18, 0.18, 0.18))
+	for x in range(64):
+		for y in range(20):
+			imagem.set_pixel(x, y, Color.WHITE)
+	# O PIXEL QUE MUDA PRECISA ESTAR NA GRADE QUE O SERVIÇO OLHA.
+	#
+	# A assinatura sai de 48 pontos em grade (8 colunas × 6 linhas), e
+	# não da imagem inteira — é o que a torna barata o bastante para
+	# rodar a cada quadro. Um pixel mexido FORA desses pontos não muda
+	# assinatura nenhuma, e o teste estaria oferecendo, para o serviço,
+	# dois quadros idênticos: exatamente o buffer morto que ele recusa.
+	# Aqui o ponto é o (4, 36), que é o da coluna 0, linha 4 da grade.
+	imagem.set_pixel(4, 36, Color(float(semente % 7) / 7.0, 0.5, 0.2))
+	return imagem
+
+# ------------------------------- camera acesa nao apaga sozinha
+func _test_camera_acesa_nao_apaga() -> void:
+	var camera: CameraService = jogo.camera_service
+	camera.enabled = true
+	camera.estado = camera.Estado.ACESA
+	camera._registrar_quadro(_quadro_vivo(1), Time.get_ticks_msec())
+	assert(camera.ao_vivo())
+	assert(camera.pronta())
+
+	# A amostragem de saúde não religa o dispositivo. Um quadro novo apenas
+	# atualiza a prova de vida; o feed nativo continua sendo o mesmo.
+	camera._last_frame_ms = Time.get_ticks_msec() - camera.VIDA_MAXIMA_MS - 200
+	assert(not camera.ao_vivo())
+	assert(not camera.pronta())
+	camera._registrar_quadro(_quadro_vivo(2), Time.get_ticks_msec())
+	assert(camera.ao_vivo())
+	assert(camera.pronta())
+
+	# Um aviso do CameraServer não invalida uma sessão aprovada.
+	camera._on_camera_feeds_updated(0)
+	assert(camera.pronta())
+
+	# Desligamento explícito encerra a sessão.
+	camera.pedir_fechamento()
+	assert(camera.estado == camera.Estado.DESLIGADA)
+	assert(not camera.pronta())
+
+	camera.enabled = true
+	camera.estado = camera.Estado.SUBINDO
+
+# ------------------- câmera nunca bloqueia uma partida
+func _test_camera_manda_na_rodada() -> void:
+	var camera: CameraService = jogo.camera_service
+	_sensor_pronto()
+	jogo.camera_obrigatoria = true
+	jogo.camera_enabled = true
+	camera.enabled = true
+	camera.estado = camera.Estado.SUBINDO
+	camera._ultima_mudanca_ms = 0
+	jogo.state = GameDef.State.IDLE
+	jogo.game_mode = "credit"
+	jogo.credits = 3
+
+	# Mesmo um valor antigo salvo como obrigatório não pode bloquear START.
+	assert(jogo.camera_liberou_a_rodada())
+	jogo._iniciar_rodada()
+	assert(jogo.state == GameDef.State.COUNTDOWN)
+	assert(jogo.credits == 2)
+	# Imagem ausente ou congelada não para o relógio.
+	camera._last_frame_ms = Time.get_ticks_msec() - camera.VIDA_MAXIMA_MS - 400
+	var antes: float = jogo.countdown_left
+	jogo._processar_contagem(0.016)
+	assert(not jogo.aguardando_camera)
+	assert(jogo.countdown_left < antes)
+	jogo._entrar_em_abertura()
+
+# ------------------------- foto entra quando a câmera está acesa
+func _test_contagem_espera_a_camera() -> void:
+	var camera: CameraService = jogo.camera_service
+	_sensor_pronto()
+	jogo.state = GameDef.State.IDLE
+	jogo.camera_obrigatoria = false
+	camera.enabled = true
+	jogo.camera_enabled = true
+	camera.estado = camera.Estado.SUBINDO
+	assert(not camera.pronta())
+
+	jogo.credits = 9
+	# `_iniciar_rodada` e nao `_pressionou_start`: o segundo so vale em
+	# IDLE ou RESULT, e aqui a rodada e comecada duas vezes de proposito.
+	jogo._iniciar_rodada()
+	assert(not jogo.aguardando_camera)
+	var comeco: float = jogo.countdown_left
+	for i in range(30):
+		jogo._processar_contagem(0.016)
+	assert(not jogo.aguardando_camera)
+	assert(jogo.countdown_left < comeco)
+
+	# Acendeu: a contagem destrava e o obturador abre junto. "Acendeu"
+	# agora quer dizer imagem CHEGANDO, e não só o estado dizendo ACESA.
+	camera.estado = camera.Estado.ACESA
+	camera._registrar_quadro(_quadro_vivo(21), Time.get_ticks_msec())
+	jogo._processar_contagem(0.016)
+	assert(not jogo.aguardando_camera)
+
+	camera.estado = camera.Estado.SUBINDO
+	jogo._entrar_em_abertura()
+
+# --------------------------- a apresentacao volta sozinha
+func _test_laco_de_atracao() -> void:
+	jogo._entrar_em_abertura()
+	jogo.intro_active = false
+	jogo.central_aberta = false
+	jogo.calib_ativo = false
+	jogo.atracao_relogio = 0.0
+
+	# Antes da hora, nada acontece.
+	jogo._laco_de_atracao(jogo.ATRACAO_INTERVALO - 1.0)
+	assert(not jogo.intro_active)
+
+	# Passado o intervalo, a entrada recomeca do primeiro quadro.
+	jogo._laco_de_atracao(2.0)
+	assert(jogo.intro_active)
+	assert(is_equal_approx(jogo.intro_time, 0.0))
+
+	# COM A CENTRAL ABERTA, NUNCA. Reiniciar a entrada por baixo do
+	# tecnico que esta configurando faz ele perder o que estava fazendo.
+	jogo.intro_active = false
+	jogo.central_aberta = true
+	jogo.atracao_relogio = 0.0
+	jogo._laco_de_atracao(jogo.ATRACAO_INTERVALO + 5.0)
+	assert(not jogo.intro_active)
+	assert(jogo.atracao_relogio == 0.0)
+	jogo.central_aberta = false
+
+# ----------------------------------------- o teto de efeitos
+func _test_teto_de_efeitos() -> void:
+	var d: Desempenho = jogo.desempenho
+	var antes := d.teto
+	d.teto = "AUTO"
+	d.qualidade = 1.0
+	d.aplicar_teto()
+	assert(is_equal_approx(d.qualidade, 1.0))
+
+	# O teto CORTA, nunca levanta. Com MEDIO, uma qualidade cheia desce.
+	d.teto = "MEDIO"
+	d.qualidade = 1.0
+	d.aplicar_teto()
+	assert(d.qualidade < 1.0)
+
+	# E uma maquina que ja esta abaixo do teto continua abaixo: nenhum
+	# ajuste da Central pode obrigar a maquina a gastar mais do que ela
+	# aguenta.
+	d.qualidade = 0.20
+	d.aplicar_teto()
+	assert(is_equal_approx(d.qualidade, 0.20))
+
+	# A roda do botao passa pelos quatro e volta.
+	d.teto = "AUTO"
+	var voltas: Array[String] = []
+	for i in range(4):
+		d.teto = d.proximo_teto()
+		voltas.append(d.teto)
+	assert(voltas[3] == "AUTO")
+
+	d.teto = antes
+	d.qualidade = 1.0
+	d.aplicar_teto()
+
+# ------------------------------------------- fixar a porta serial
+func _test_porta_fixa() -> void:
+	var antes: String = jogo.porta_configurada
+	jogo.porta_configurada = ""
+	jogo.portas_visiveis = PackedStringArray()
+
+	# DA PARA FIXAR UMA PORTA QUE NAO ESTA A VISTA. Era o contrario, e
+	# isso tornava a opcao inutil justamente quando ela e necessaria: com
+	# a placa desligada, a COM do Nano nao aparece na lista.
+	var opcoes: PackedStringArray = jogo._opcoes_de_porta()
+	assert(str(opcoes[0]) == "AUTO")
+	if OS.get_name() == "Windows":
+		assert(opcoes.has("COM5"))
+
+	# A escolha guardada sobrevive mesmo sem ninguem ver a porta hoje.
+	jogo.porta_configurada = "COM9"
+	jogo.portas_visiveis = PackedStringArray(["COM3"])
+	assert(jogo._opcoes_de_porta().has("COM9"))
+	assert(jogo._opcoes_de_porta().has("COM3"))
+
+	# E ela vai e volta na roda sem sair da lista.
+	jogo.porta_configurada = ""
+	jogo._girar_porta(1)
+	assert(not jogo.porta_configurada.is_empty())
+	jogo._girar_porta(-1)
+	assert(jogo.porta_configurada.is_empty())
+
+	jogo.porta_configurada = antes
+
+# ------------------- os botoes do Arduino, da linha serial ao credito
+## AS LINHAS EXATAS QUE O FIRMWARE MANDA, ENTRANDO PELA PORTA.
+##
+## Este teste existe para separar de vez os dois lados. Ele nao simula
+## "um botao": ele entrega ao jogo o TEXTO IDENTICO que a placa escreve
+## na serial, e cobra o resultado. Passando, esta provado que do `READY`
+## ao credito na tela nao ha defeito no jogo -- e o que sobrar esta no
+## fio, no pino ou na placa.
+func _test_botoes_do_arduino_ponta_a_ponta() -> void:
+	jogo._entrar_em_abertura()
+	jogo.central_aberta = false
+	jogo.camera_obrigatoria = false
+	jogo.game_mode = "credit"
+	jogo.credits = 0
+	jogo.serial_start = 0
+	jogo.serial_credito = 0
+	jogo.porta_atual = "COM5"
+	jogo.firmware_optico_identificado = false
+	jogo.sensor_presente = false
+
+	# SEM A EXTENSAO NATIVA, O JOGO TEM DE DIZER ISSO NA TELA. Falha
+	# silenciosa aqui manda o tecnico procurar fio solto durante horas por
+	# causa de um arquivo que nao veio na exportacao -- e e o defeito que
+	# aparece so no computador novo, porque no PC de quem desenvolve a
+	# extensao esta sempre la.
+	var guardado = jogo.link
+	jogo.link = null
+	jogo._tentar_conectar()
+	assert("SEM CAMINHO" in jogo.serial_status.to_upper())
+	jogo.link = guardado
+	if jogo.link is FakeSerial:
+		(jogo.link as FakeSerial).aberta = true
+
+	# A placa se apresenta.
+	jogo._on_serial_line("READY,PUNCH_OPTICAL,V1")
+	assert("COM5" in jogo.serial_status)
+	assert(not jogo.sensor_presente)
+	assert(jogo.porta_serial_conhecida == "COM5")
+	# READY prova só a placa. O firmware precisa confirmar o MPU antes de
+	# qualquer START poder consumir a ficha.
+	jogo._on_serial_line("OK,OPTICAL")
+	assert(not jogo._sensor_ligado())
+	jogo._on_serial_line("CALIBRATED,0.0,0.0,1.0")
+	assert(jogo._sensor_ligado())
+
+	# CREDITO: a linha entra, o saldo sobe.
+	jogo._on_serial_line("BUTTON,CREDIT")
+	assert(jogo.credits == 1)
+	assert(jogo.serial_credito == 1)
+
+	# START com credito: a rodada comeca.
+	assert(jogo.state == GameDef.State.IDLE)
+	jogo._on_serial_line("BUTTON,START")
+	assert(jogo.serial_start == 1)
+	assert(jogo.state == GameDef.State.COUNTDOWN)
+	assert(jogo.credits == 0)
+
+	# O ESTADO CRU DOS PINOS CHEGA E FICA A VISTA.
+	jogo._on_serial_line("PINS,1,0")
+	assert(jogo.pino_start)
+	assert(not jogo.pino_credito)
+	jogo._on_serial_line("PINS,0,1")
+	assert(not jogo.pino_start)
+	assert(jogo.pino_credito)
+
+	# COM A CENTRAL ABERTA o aperto nao vira credito -- mas o contador
+	# sobe assim mesmo, que e o que prova o fio ao tecnico enquanto ele
+	# esta justamente olhando a tela de diagnostico.
+	jogo._entrar_em_abertura()
+	jogo.central_aberta = true
+	jogo.credits = 0
+	jogo._on_serial_line("BUTTON,CREDIT")
+	assert(jogo.credits == 0)
+	assert(jogo.serial_credito == 2)
+	jogo.central_aberta = false
+
+	# START SEM CREDITO no modo ficha nao comeca rodada nenhuma.
+	jogo.credits = 0
+	jogo._on_serial_line("BUTTON,START")
+	assert(jogo.state == GameDef.State.IDLE)
+
+	# E no modo livre comeca sem ficha.
+	jogo.game_mode = "free"
+	jogo._on_serial_line("BUTTON,START")
+	assert(jogo.state == GameDef.State.COUNTDOWN)
+
+	jogo.game_mode = "credit"
+	jogo._entrar_em_abertura()
+
+
+## A PONTE POR PROCESSO, DO COMEÇO AO FIM.
+##
+## Este é o caminho que a máquina do operador vai usar: a extensão nativa
+## não carregou lá, e sem um segundo caminho START, CRÉDITO, sensor e
+## fitas ficam mortos. O teste sobe um ajudante de mentira que fala o
+## mesmo protocolo dos ajudantes de verdade e cobra o percurso inteiro —
+## processo filho, thread de leitura, cano nos dois sentidos, protocolo —
+## porque o único pedaço que não dá para exercitar aqui é o fio de cobre.
+##
+## Vale reparar no que ele prova de mais importante: que uma porta que
+## RECUSA não trava a procura. Foi assim que o jogo passou noites inteiras
+## parado numa porta de Bluetooth enquanto o Arduino estava na porta de
+## trás.
+func _test_ponte_por_processo() -> void:
+	PonteProcessoLink.receita_de_teste = [
+		[ProjectSettings.globalize_path("res://tests/ponte_falsa.sh")], ["/bin/sh"]
+	]
+	var ponte := PonteProcessoLink.new()
+	assert(await _ponte_ate(ponte, func() -> bool: return ponte.available()))
+
+	var recebidas: Array[String] = []
+	ponte.line_received.connect(func(l: String) -> void: recebidas.append(l))
+	var abertas: Array[String] = []
+	ponte.opened.connect(func(p: String) -> void: abertas.append(p))
+	var fechadas: Array[String] = []
+	ponte.closed.connect(func(p: String) -> void: fechadas.append(p))
+
+	# A apresentação chega e a lista de portas vem atrás dela.
+	assert(await _ponte_ate(ponte, func() -> bool: return ponte.list_ports().size() == 2))
+	assert(ponte.list_ports()[0] == "COMBOA")
+
+	# A PORTA QUE RECUSA NÃO PODE PRENDER A FILA.
+	assert(ponte.open_port("COMRUIM", 115200))
+	assert(await _ponte_ate(ponte, func() -> bool: return not ponte.is_open()))
+	assert(fechadas.has("COMRUIM"))
+	assert(recebidas.is_empty())
+
+	# A porta boa abre, e a placa se apresenta por ela.
+	assert(await _ponte_ate(ponte, func() -> bool: return ponte.open_port("COMBOA", 115200)))
+	assert(await _ponte_ate(ponte, func() -> bool: return abertas.has("COMBOA")))
+	assert(await _ponte_ate(ponte, func() -> bool: return recebidas.has("READY,PUNCH_OPTICAL,V1")))
+
+	# O CANO ANDA NOS DOIS SENTIDOS. Sem isto não há CONFIG, não há LEDS e
+	# não há PING — ou seja, não há calibração nem fitas acompanhando o
+	# soco.
+	recebidas.clear()
+	assert(ponte.send_line("PING"))
+	assert(await _ponte_ate(ponte, func() -> bool: return recebidas.has("PONG")))
+	recebidas.clear()
+	assert(ponte.send_line("LEDS,640"))
+	assert(await _ponte_ate(ponte, func() -> bool: return recebidas.has("ECO,LEDS,640")))
+
+	# Uma linha de protocolo que atravessou a ponte tem de ser entendida
+	# do outro lado exatamente como a da extensão nativa.
+	recebidas.clear()
+	assert(ponte.send_line("TEST"))
+	assert(await _ponte_ate(ponte, func() -> bool: return recebidas.has("BUTTON,START")))
+	assert(ArduinoProtocol.parse(recebidas[0])["type"] == "BUTTON")
+
+	ponte.close_port()
+	assert(not ponte.is_open())
+	ponte.encerrar()
+	assert(not ponte.available())
+	PonteProcessoLink.receita_de_teste = []
+
+## Espera uma condição da ponte por até dois segundos, chamando `poll()`
+## como o jogo chama. Tempo de verdade, porque do outro lado há um
+## processo de verdade: um teste que só conta quadros passaria antes de o
+## sistema operacional ter chegado a rodar o ajudante.
+func _ponte_ate(ponte: PonteProcessoLink, condicao: Callable) -> bool:
+	for _i in range(200):
+		ponte.poll()
+		if bool(condicao.call()):
+			return true
+		OS.delay_msec(10)
+		await process_frame
+	return false
+
+# ------------------- o vigia mede o PIOR quadro, e nao a media
+func _test_todas_as_camadas_andam_no_mesmo_relogio() -> void:
+	"""Fundo, moldura e letreiro tinham cada um o SEU `_process`.
+
+	Tres nos somando o delta CRU, cada um por conta propria, mais o jogo
+	somando o dele: quatro relogios para uma cena so. Basta um quadro
+	engasgado cair diferente em dois deles para a fagulha do fundo andar
+	um tanto e a lampada da moldura outro -- e e justamente nas camadas
+	lentas e continuas que o olho enxerga essa diferenca. Agora `main.gd`
+	adianta os tres com o passo ja suavizado do `Ritmo`.
+
+	A troca tem um modo de falhar proprio, e ele ja aconteceu durante
+	esta mudanca: desligar o `_process` de um no e esquecer de chama-lo
+	do laco principal. O resultado e uma camada que simplesmente PARA --
+	a moldura congelada, o brilho do letreiro travado -- sem erro nenhum
+	na tela. Este teste existe para esse caso, e para nada mais.
+	"""
+	# Nenhuma das tres pode ter voltado a ter relogio proprio.
+	assert(not jogo.fundo.is_processing())
+	assert(not jogo.moldura.is_processing())
+	assert(not jogo.letreiro_do_nome.is_processing())
+
+	var fundo_antes: float = jogo.fundo.tempo
+	var moldura_antes: float = jogo.moldura.tempo
+	var letreiro_antes: float = jogo.letreiro_do_nome._tempo
+
+	# O laco de verdade, um quadro. `set_process(false)` desliga o
+	# automatico, nao a funcao -- entao chamar aqui exercita o mesmo
+	# caminho que roda na maquina.
+	jogo._process(1.0 / 60.0)
+
+	assert(jogo.fundo.tempo > fundo_antes)
+	assert(jogo.moldura.tempo > moldura_antes)
+	assert(jogo.letreiro_do_nome._tempo > letreiro_antes)
+
+	# E os tres andaram EXATAMENTE o mesmo tanto: e isso que faz a cena
+	# ser uma cena, e nao tres animacoes vizinhas.
+	var passo_fundo: float = jogo.fundo.tempo - fundo_antes
+	var passo_moldura: float = jogo.moldura.tempo - moldura_antes
+	var passo_letreiro: float = jogo.letreiro_do_nome._tempo - letreiro_antes
+	assert(is_equal_approx(passo_fundo, passo_moldura))
+	assert(is_equal_approx(passo_fundo, passo_letreiro))
+
+func _test_vigia_mede_o_pior_quadro() -> void:
+	"""Uma tela que engasga uma vez a cada vinte quadros tem media otima.
+
+	E era a media que mandava. Nove quadros de 16 ms e um de 40 ms dao
+	uma media de 18,4 ms -- "esta bom" -- enquanto o unico quadro que a
+	pessoa na frente da maquina enxerga e o de 40. Pior: o engasgo deste
+	jogo e PERIODICO e sempre no mesmo lugar (o instante do soco), entao
+	a qualidade subia de volta ao maximo na tela de atracao, calma, e
+	desabava de novo no impacto seguinte -- uma vez por rodada.
+	"""
+	var d := Desempenho.new()
+	d.teto = "AUTO"
+	d.qualidade = 1.0
+
+	# Dezenove quadros bons e um pessimo: a media aprova, o pior reprova.
+	for i in range(d.JANELA * 3):
+		d.medir(0.040 if i % 20 == 0 else 1.0 / 120.0)
+	assert(d.fps() > Desempenho.ALVO_ALTO)
+	assert(d.qualidade < 1.0)
+
+	# E so volta a subir quando a janela inteira passa sem tranco algum.
+	var caiu: float = d.qualidade
+	for i in range(d.JANELA * 3):
+		d.medir(1.0 / 120.0)
+	assert(d.qualidade > caiu)
