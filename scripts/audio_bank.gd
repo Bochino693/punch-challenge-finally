@@ -226,3 +226,7 @@ func stop(nome: String) -> void:
 	var player: AudioStreamPlayer = _players.get(nome)
 	if player != null:
 		player.stop()
+
+func playing(nome: String) -> bool:
+	var player: AudioStreamPlayer = _players.get(nome)
+	return player != null and player.is_inside_tree() and player.playing

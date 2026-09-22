@@ -700,6 +700,9 @@ const JANELA_TARDIA_OBTURADOR_SEGUNDOS := 0.5
 var _obturador_tardio_aberto := false
 var photo_retained := false
 var ranking_announced := false
+## Instante em que a tabela realmente começou. Uma comemoração longa
+## pode adiar a classificação sem fazer a animação correr escondida.
+var ranking_started_at := -1.0
 var intro_active := true
 var intro_time := 0.0
 ## O QUANTO A ABERTURA JÁ CHEGOU, de 0 a 1.
@@ -1247,6 +1250,7 @@ func _armar_proximo_soco() -> void:
 	verdict_time = -1.0
 	result_time = 0.0
 	ranking_announced = false
+	ranking_started_at = -1.0
 	fundo.matiz = Color(0, 0, 0, 0)
 	state = GameDef.State.ARMED
 	_armar_sensor_optico()
@@ -1397,9 +1401,19 @@ func _dois_socos_bons() -> bool:
 ## O acaso vira regra escrita aqui: a tabela é o fim da rodada. Quem
 ## ainda tem soco a dar não a vê.
 func _tabela_no_ar() -> bool:
-	return state == GameDef.State.RESULT \
-		and verdict_time >= ESPERA_DO_RANKING \
-		and _rodada_terminou()
+	if state != GameDef.State.RESULT or not _rodada_terminou():
+		return false
+	if _dois_socos_bons() and sons.playing("good_player"):
+		return false
+	return verdict_time >= ESPERA_DO_RANKING
+
+const SONS_RANKING_NEUTROS := [
+	"ranking_neutral_1", "ranking_neutral_2", "ranking_neutral_3",
+]
+
+func _som_ranking_neutro() -> String:
+	var semente := maxi(0, plays + posicao_no_ranking)
+	return str(SONS_RANKING_NEUTROS[semente % SONS_RANKING_NEUTROS.size()])
 
 func _processar_resultado(delta: float) -> void:
 	result_time += delta
@@ -1431,7 +1445,8 @@ func _processar_resultado(delta: float) -> void:
 		# colocação que ainda não existe.
 		if _tabela_no_ar() and not ranking_announced:
 			ranking_announced = true
-			sons.play("ranking", -5.0)
+			ranking_started_at = verdict_time
+			sons.play(_som_ranking_neutro(), -3.0)
 			sons.music(-24.0)
 		# Os atos têm deixas diferentes (tabela, assentamento e confete),
 		# portanto precisam ser conferidos a cada quadro. Antes esta função
@@ -1448,7 +1463,10 @@ func _processar_resultado(delta: float) -> void:
 			_armar_proximo_soco()
 		return
 
-	if result_time > GameDef.RESULTADO_TIMEOUT:
+	if posicao_no_ranking > 0:
+		if ranking_announced and _tempo_do_ranking() > 7.0:
+			_entrar_em_abertura()
+	elif result_time > GameDef.RESULTADO_TIMEOUT and not sons.playing("good_player"):
 		_entrar_em_abertura()
 
 ## AS DEIXAS DOS QUATRO ATOS DA ENTRADA NO RANKING.
@@ -1479,8 +1497,8 @@ func _marcar_atos_do_ranking() -> void:
 	# da informação; depois dele, vira festa.
 	if not _ato_festejou and t >= ATO_ANUNCIO + ATO_TABELA + ATO_ASSENTA:
 		_ato_festejou = true
-		sons.play("record" if posicao_no_ranking == 1 else "win", -3.0)
-		sons.play(str(celebracao["som"]), float(celebracao["volume"]))
+		# Um único estouro instrumental substitui as duas vozes sobrepostas.
+		sons.play("ranking_burst", -1.5)
 		sons.duck(10.0, 4.5)
 		# O papel não nasce todo neste quadro. A festa sustentada abaixo
 		# entrega mais confete sem o pico de CPU que congelava a tabela.
@@ -1818,6 +1836,7 @@ func _iniciar_rodada() -> void:
 	_obturador_tardio_aberto = false
 	photo_retained = false
 	ranking_announced = false
+	ranking_started_at = -1.0
 	_ato_assentou = false
 	_ato_festejou = false
 	_festa_ranking_decorrido = 0.0
@@ -3094,7 +3113,7 @@ func _on_serial_closed(_porta: String) -> void:
 	progresso_calibracao = 0
 	proxima_tentativa = animation_time + (1.0 if estava_falando else 0.18)
 	if estava_falando:
-		sons.play("error", -8.0)
+		sons.play("disconnect_alert", -4.0)
 	# Sem sensor não há rodada honesta. Antes do primeiro golpe, devolve a
 	# ficha; entre as duas tentativas, preserva o resultado já conquistado.
 	if not central_aberta and state in [GameDef.State.COUNTDOWN, GameDef.State.ARMED]:
@@ -5127,7 +5146,9 @@ const ATO_TABELA := 0.68
 const ATO_ASSENTA := 0.45
 
 func _tempo_do_ranking() -> float:
-	return maxf(0.0, verdict_time - ESPERA_DO_RANKING)
+	if not ranking_announced or ranking_started_at < 0.0:
+		return 0.0
+	return maxf(0.0, verdict_time - ranking_started_at)
 
 func _draw_ranking_reveal() -> void:
 	var t := _tempo_do_ranking()

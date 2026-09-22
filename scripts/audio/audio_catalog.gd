@@ -21,6 +21,8 @@ const FALLBACK := {
 ## mesa nova e nunca tiveram versão antiga.
 const EXTRA := [
 	"music", "shutter", "ranking", "score_loop",
+	"ranking_neutral_1", "ranking_neutral_2", "ranking_neutral_3",
+	"ranking_burst", "disconnect_alert",
 	"nivel_leve", "nivel_bom", "nivel_forte", "nivel_explosivo",
 	"nivel_nocaute", "nivel_peso", "nivel_lendario", "nivel_perfeito",
 	"start_negado", "armado", "couro", "subgrave",
@@ -61,7 +63,8 @@ const BARRAMENTOS := {
 	"arena_corpo": "Impact", "arena_queda": "Impact", "arena_publico": "SFX",
 	"not_supress": "Impact", "good_player": "SFX",
 	"credit": "UI", "start": "UI", "start_negado": "UI", "menu": "UI",
-	"error": "UI", "count": "UI", "go": "UI", "tick": "UI",
+	"error": "UI", "disconnect_alert": "UI",
+	"count": "UI", "go": "UI", "tick": "UI",
 	"shutter": "UI", "armado": "UI", "round_bell": "UI",
 }
 const BARRAMENTO_PADRAO := "SFX"
