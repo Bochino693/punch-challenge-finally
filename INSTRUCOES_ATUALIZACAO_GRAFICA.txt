@@ -36,18 +36,23 @@ enquadramento -- e a camera foi afastada tres vezes para compensar.
 Agora TOPO_DA_CABECA_PX e SOLA_DO_PE_PX saem da medida, e a camera se
 enquadra sozinha a partir delas.
 
-O PE DA PERNA DE TRAS VEM CORTADO NA FOLHA
-Seis das nove poses (guarda, idle, preparado, jab, direto e
-impacto_corpo) encostam na borda de baixo da celula: o desenho termina
-no meio da canela. Isso e defeito de ARTE -- nenhuma conta inventa um pe
-que nao foi desenhado. O codigo faz o que da: poe a sola do pe da FRENTE
-na lona, o que deixa o corte terminando abaixo do tapete e escondido por
-ele, e desenha uma sombra de contato por cima da junta.
+A LINHA DO CHAO E A BORDA DE BAIXO DA CELULA
+O lutador esta em guarda, um pe a frente do outro. No desenho o pe DE
+TRAS aparece mais ALTO (perspectiva: o chao sobe na tela conforme se
+afasta) e o pe DA FRENTE encosta na borda de baixo da celula. Seis das
+nove poses alcancam essa borda, e isso e o CERTO -- e onde fica o chao.
 
-PARA RESOLVER DE VEZ, reexporte a folha com a figura MENOR dentro da
-mesma celula de 410 x 426: bastam uns 12 px de folga embaixo e 4 em
-cima. Os nove recortes e o codigo continuam iguais; so a arte muda. Em
-seguida rode tools/medir_folha.gd e cole as duas constantes.
+Durante tres correcoes seguidas a medida procurou a sola na METADE
+ESQUERDA da folha, achou o pe de tras (linha 418) e chamou aquilo de
+chao. A bota da frente, oito pixels mais baixa, ficava enterrada no
+tapete e aparecia decepada. As duas botas estao INTEIRAS na arte; o que
+faltava era pousar a certa.
+
+A regra e: a figura encosta no chao pelo PONTO MAIS BAIXO dela.
+
+SE VOCE TROCAR A ARTE, desenhe a sola do pe da frente na ultima linha da
+celula. Uma pose de pe que nao alcance essa linha vai aparecer
+flutuando, e tests/test_folha_lutador.gd reprova.
 
 TROCAR A ARTE
 Substitua a folha e o .tres mantendo os nove nomes de pose: guarda, idle,
