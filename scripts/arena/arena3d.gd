@@ -30,8 +30,21 @@ extends SubViewport
 ##   • ela só liga nas telas em que aparece. Fica viva do 3–2–1 ao
 ##     resultado e desliga na abertura e na tabela de recordes.
 
-const TAMANHO_CHEIO := Vector2i(640, 717)
-const TAMANHO_MAGRO := Vector2i(448, 502)
+## A JANELA TEM O TAMANHO EXATO DO BURACO DA MOLDURA — e isso é novo.
+##
+## Ela era 640 × 717 e era desenhada num buraco de 688 × 770
+## (`ArenaQuadro.TELA`). A proporção batia, então nada parecia errado;
+## o que havia era um ESTICÃO de 1,075× em cima da arena inteira, toda
+## vez, antes de ela chegar à tela. Um esticão fracionário não realinha
+## pixel com pixel: cada um vira mistura de dois, e o que some nessa
+## mistura são justamente os detalhes de um ou dois pixels — a ponta da
+## bota, o fio de luz na luva, o contorno ciano.
+##
+## Em 688 × 770 o desenho da arena cai no buraco um para um e o esticão
+## deixa de existir. Custa 15% mais pixels; o vigia de desempenho
+## continua tendo a janela magra para quando a máquina apertar.
+const TAMANHO_CHEIO := Vector2i(688, 770)
+const TAMANHO_MAGRO := Vector2i(482, 539)
 
 ## O ENQUADRAMENTO DA CÂMERA, EM DUAS CONSTANTES (ver `_calcular_enquadramento`).
 ##
@@ -44,6 +57,34 @@ const OCUPACAO_DO_LUTADOR := 0.79
 ## Quanto a câmera fica ACIMA da mira, em metros. É o que dá a leve
 ## inclinação de transmissão; zero deixaria a imagem chapada de frente.
 const CAMERA_ACIMA_DA_MIRA := 0.21
+
+## ------------------------------------------------------ o chão do ringue
+##
+## ONDE O LUTADOR PISA, EM METROS — e por que isto precisou virar uma
+## constante com nome.
+##
+## A lona grande (4,6 × 4,6) tem o topo em y = 0, e foi nesse zero que o
+## lutador foi posto a pisar. Só que EM CIMA dela há um miolo mais claro
+## de 3 × 3 que sobe até **y = 0,015** — um centímetro e meio —, e é ele
+## que está debaixo do lutador. Ou seja: o chão de verdade nunca esteve
+## em zero, e a bota do pé da frente ficava um centímetro e meio DENTRO
+## do miolo.
+##
+## E, de novo, isso não se vê como pé enterrado: o miolo é desenhado na
+## frente do plano do desenho, então o que se vê é a PONTA DA BOTA
+## CORTADA — quatro ou cinco pixels dela comidos pelo tapete. Foi o que
+## sobrou depois de a sola ter sido posta em zero.
+##
+## Agora o miolo é construído a partir desta constante e o lutador é
+## pousado nela, então os dois não têm como divergir de novo.
+const ALTURA_DA_LONA := 0.015
+## Um fio de folga entre a sola e o tapete: sem ela as duas superfícies
+## ficam no mesmo plano e a decisão de qual aparece primeiro vira sorteio
+## do teste de profundidade — que é o mesmo corte, só que intermitente.
+## Quatro milímetros dão um pixel de fonte; não se vê.
+const FOLGA_DA_SOLA := 0.004
+## A altura, no mundo, em que a sola do pé da frente encosta.
+const PISO_DO_LUTADOR := ALTURA_DA_LONA + FOLGA_DA_SOLA
 
 ## Cores da arena. O salão é claro no 2D; aqui dentro é escuro de
 ## propósito — o quadro tem de ler como uma JANELA para outro lugar, e
@@ -199,7 +240,14 @@ func _malha_do_ringue() -> ArrayMesh:
 	_caixa(st, Vector3(0.0, -0.9, -0.4), Vector3(14.0, 0.3, 9.0), Color("060810"))
 	# a lona e a saia do ringue
 	_caixa(st, Vector3(0.0, -0.06, 0.0), Vector3(4.6, 0.12, 4.6), COR_LONA)
-	_caixa(st, Vector3(0.0, 0.005, 0.0), Vector3(3.0, 0.02, 3.0), COR_LONA_CENTRO)
+	# O MIOLO CLARO, e a altura dele agora É `ALTURA_DA_LONA`. Os números
+	# soltos que estavam aqui (centro 0,005 e espessura 0,02, ou seja topo
+	# em 0,015) eram o chão real do ringue sem que nada no código dissesse
+	# isso — e era contra esse chão que a bota do lutador batia.
+	_caixa(
+		st, Vector3(0.0, ALTURA_DA_LONA - 0.01, 0.0),
+		Vector3(3.0, 0.02, 3.0), COR_LONA_CENTRO
+	)
 	_caixa(st, Vector3(0.0, -0.36, 0.0), Vector3(4.9, 0.50, 4.9), COR_BORDA)
 	# quatro postes; os da frente ficam fora do enquadramento de propósito
 	for sx in [-1.0, 1.0]:
@@ -435,6 +483,14 @@ func _montar_particulas_de_impacto() -> void:
 func instalar() -> bool:
 	lutador = Lutador3D.new()
 	lutador.name = "Lutador"
+	# QUEM SABE ONDE FICA O CHÃO É A ARENA, NÃO O LUTADOR.
+	#
+	# `Lutador3D` põe a sola do pé da frente no y = 0 DELE e não tem como
+	# saber que o ringue tem um miolo levantado. Erguer o nó inteiro até
+	# `PISO_DO_LUTADOR` é o que faz a bota pousar EM CIMA do tapete em vez
+	# de dentro dele — e continua deixando a perna de trás, que a folha
+	# traz cortada mais embaixo, terminando sob o tapete, escondida.
+	lutador.position.y = PISO_DO_LUTADOR
 	_mundo.add_child(lutador)
 	lutador.montar()
 	_montar_sombra_de_contato()
@@ -473,10 +529,11 @@ func _montar_sombra_de_contato() -> void:
 	_sombra.mesh = malha
 	_sombra.material_override = tinta
 	_sombra.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Dois centímetros acima da lona: o bastante para não brigar com o
-	# tapete pelo mesmo pixel de profundidade, pouco o bastante para não
-	# flutuar.
-	_sombra.position = Vector3(0.0, 0.022, 0.0)
+	# Logo acima do tapete: o bastante para não brigar com ele pelo mesmo
+	# pixel de profundidade, pouco o bastante para não flutuar. Sai da
+	# mesma constante do chão — uma mancha alguns milímetros abaixo do
+	# miolo simplesmente não apareceria.
+	_sombra.position = Vector3(0.0, ALTURA_DA_LONA + 0.007, 0.0)
 	_mundo.add_child(_sombra)
 
 ## A MANCHA ACOMPANHA O CORPO. Ela anda com a respiração e com o recuo
@@ -487,7 +544,7 @@ func _sombra_de_contato() -> void:
 		return
 	var desloc := lutador.deslocamento()
 	var caido := clampf(lutador.queda, 0.0, 1.0)
-	_sombra.position = Vector3(desloc.x, 0.022, desloc.z * 0.6)
+	_sombra.position = Vector3(desloc.x, ALTURA_DA_LONA + 0.007, desloc.z * 0.6)
 	_sombra.scale = Vector3(lerpf(1.0, 1.8, caido), 1.0, lerpf(1.0, 1.45, caido))
 	var tinta := _sombra.material_override as StandardMaterial3D
 	if tinta != null:
@@ -620,8 +677,11 @@ func _calcular_enquadramento() -> void:
 	var janela := figura / OCUPACAO_DO_LUTADOR
 	var meia := deg_to_rad(camera.fov) * 0.5
 	_distancia = janela / (2.0 * tan(meia))
-	# A sobra repartida: metade vira tapete embaixo, metade vira ar em cima.
-	var base := -(janela - figura) * 0.5
+	# A sobra repartida: metade vira tapete embaixo, metade vira ar em
+	# cima. E a conta parte do PISO, não de zero: o lutador está pousado
+	# em cima do miolo da lona, e enquadrar a partir de zero deixaria a
+	# folga de baixo um centímetro e meio menor do que a de cima.
+	var base := PISO_DO_LUTADOR - (janela - figura) * 0.5
 	var inclinacao := atan(CAMERA_ACIMA_DA_MIRA / _distancia)
 	_altura_da_camera = base + _distancia * tan(inclinacao + meia)
 	_altura_da_mira = _altura_da_camera - CAMERA_ACIMA_DA_MIRA

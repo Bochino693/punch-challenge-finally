@@ -35,6 +35,7 @@ func _initialize() -> void:
 	_test_a_folha_de_sprites_existe_com_as_nove_poses()
 	_test_o_lutador_tem_tamanho_de_gente()
 	_test_a_janela_tem_a_proporcao_do_buraco()
+	_test_a_bota_pousa_em_cima_do_tapete()
 	_test_as_barras_cabem_na_moldura()
 	_test_a_postura_parada_se_mexe()
 	_test_nenhum_pe_atravessa_a_lona()
@@ -125,6 +126,51 @@ func _test_a_janela_tem_a_proporcao_do_buraco() -> void:
 	for tamanho in [Arena3D.TAMANHO_CHEIO, Arena3D.TAMANHO_MAGRO]:
 		var janela := float(tamanho.x) / float(tamanho.y)
 		_perto(janela, buraco, 0.01, "a janela 3D %s tem de ter a proporção do buraco da moldura" % tamanho)
+	# E A JANELA CHEIA TEM O TAMANHO EXATO DO BURACO, não só a proporção.
+	#
+	# Proporção certa com tamanho diferente passa despercebida e custa um
+	# esticão fracionário em cima da arena inteira — 640 × 717 desenhado
+	# num buraco de 688 × 770 era 1,075×, e é nessa mistura que somem os
+	# detalhes de um ou dois pixels, a ponta da bota entre eles.
+	_ok(Arena3D.TAMANHO_CHEIO.x == int(ArenaQuadro.TELA.size.x)
+			and Arena3D.TAMANHO_CHEIO.y == int(ArenaQuadro.TELA.size.y),
+		"a janela cheia %s tem de medir o buraco %s, sem esticão" % [
+			Arena3D.TAMANHO_CHEIO, ArenaQuadro.TELA.size])
+
+## A BOTA POUSA EM CIMA DO TAPETE, E NÃO DENTRO DELE.
+##
+## A QUEIXA: "a pontinha da bota do lutador ainda fica cortada". E era
+## isso mesmo — quatro linhas da folha, comidas.
+##
+## A lona grande tem o topo em y = 0, e foi nesse zero que o lutador foi
+## posto a pisar. Só que em cima dela há um MIOLO MAIS CLARO de 3 × 3 que
+## sobe até y = 0,015, e é ele que está debaixo do lutador. Um
+## centímetro e meio, a 0,0043 m por pixel, são as quatro últimas linhas
+## da bota — e como o tapete é desenhado na frente do plano do desenho, o
+## que aparece não é pé enterrado, é bota decepada.
+##
+## O chão agora é uma constante só (`ALTURA_DA_LONA`), o miolo é
+## construído a partir dela e o lutador é pousado nela com um fio de
+## folga. Este teste cobra que os três continuem concordando.
+func _test_a_bota_pousa_em_cima_do_tapete() -> void:
+	_ok(Arena3D.PISO_DO_LUTADOR > Arena3D.ALTURA_DA_LONA,
+		"a sola tem de ficar ACIMA do tapete, senão o tapete come a bota")
+	# A folga existe para não deixar as duas superfícies no mesmo plano,
+	# mas não pode virar um lutador flutuando: um pixel da folha basta.
+	_ok(Arena3D.FOLGA_DA_SOLA <= Lutador3D.PIXEL_NO_MUNDO * 2.0,
+		"a folga da sola não pode passar de dois pixels da folha")
+	var arena := Arena3D.new()
+	get_root().add_child(arena)
+	_ok(arena.instalar(), "a arena tem de conseguir montar o lutador")
+	if arena.lutador != null:
+		_perto(arena.lutador.position.y, Arena3D.PISO_DO_LUTADOR, 0.0001,
+			"o lutador tem de ser pousado no piso do ringue")
+		# E a linha mais baixa da bota — o y = 0 do lutador — tem de
+		# sobrar acima do tapete depois de somada a posição do nó.
+		_ok(arena.lutador.position.y + arena.lutador.pe_mais_baixo()
+				> Arena3D.ALTURA_DA_LONA,
+			"a sola tem de sobrar acima do tapete")
+	arena.queue_free()
 
 func _test_as_barras_cabem_na_moldura() -> void:
 	# As colunas ficam FORA da moldura e DENTRO da tela. Encostar numa
