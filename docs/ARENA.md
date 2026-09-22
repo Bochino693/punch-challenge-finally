@@ -166,6 +166,33 @@ o que, de quebra, faz o giro pivotar no pé de baixo, que é o que um corpo
 que perde a base faz. `tests/test_arena.gd` roda todas as reações quadro
 a quadro e cobra o pé mais baixo.
 
+**O chão do ringue não está em `y = 0`.** Esta foi a última fatia do
+mesmo defeito, e a mais difícil de ver. A lona grande (4,6 × 4,6) tem o
+topo em zero, e era nesse zero que o lutador pisava — mas **em cima
+dela** há um miolo mais claro de 3 × 3 que sobe até `y = 0,015`, e é
+ele que fica debaixo do lutador. Um centímetro e meio, a 0,0043 m por
+pixel, são as **quatro últimas linhas da bota**; e como o tapete é
+desenhado na frente do plano do desenho, o que aparece não é pé
+enterrado, é bota decepada.
+
+Agora o chão é uma constante só — `Arena3D.ALTURA_DA_LONA` —, o miolo é
+construído a partir dela, o lutador é pousado em
+`PISO_DO_LUTADOR = ALTURA_DA_LONA + FOLGA_DA_SOLA` e a sombra de contato
+sai da mesma medida. A folga de 4 mm (um pixel da folha) existe para as
+duas superfícies não ficarem no mesmo plano: coplanares, qual delas
+aparece vira sorteio do teste de profundidade, e o corte volta —
+intermitente, que é pior.
+
+**A janela 3D tem o tamanho exato do buraco da moldura.** Ela era
+640 × 717 e era desenhada num buraco de 688 × 770: a proporção batia,
+então nada parecia errado, mas havia um esticão de 1,075× em cima da
+arena inteira, toda vez. Um esticão fracionário não realinha pixel com
+pixel — cada um vira mistura de dois —, e o que some nessa mistura são
+justamente os detalhes de um ou dois pixels: a ponta da bota, o fio de
+luz na luva, o contorno ciano. Em 688 × 770 o desenho cai no buraco um
+para um. Custa 15% mais pixels, e a janela magra continua existindo para
+quando o vigia de desempenho apertar.
+
 **No nocaute a câmera AFASTA, não aproxima.** Um corpo em pé é alto e
 estreito; um corpo caído é baixo e largo, e o desenho do nocaute ocupa a
 largura inteira do quadro. Chegando perto — que é o instinto, e o que a
