@@ -145,6 +145,27 @@ abaixo do tapete, onde o próprio tapete a esconde, e desenhar uma
 extenso em `POSES_COM_PE_CORTADO`, e o teste avisa quando ela puder
 encolher.
 
+**O pé não pode entrar na lona — e o sintoma disso é CORTE, não
+afundamento.** A lona é desenhada *na frente* do plano do lutador, então
+tudo o que desce abaixo de `y = 0` some atrás do tapete. Um pé afundado
+não parece afundado: parece decepado. Havia duas fontes, e as duas
+passaram despercebidas por isso:
+
+- a **respiração** era um seno em torno de zero, ou seja, puxava o corpo
+  2 cm abaixo do repouso durante metade de cada ciclo — o tempo todo,
+  parado, sem ninguém bater. Virou `(1 − cos)/2`: mesmo período, mesma
+  amplitude, só que de 0 para cima;
+- o **cambaleio** inclinava a figura 0,18 rad de lado. Num desenho
+  RÍGIDO com 71 cm de meia-base, isso enterra um pé 12,7 cm. O ângulo
+  agora sai do quanto se quer ver o pé LEVANTAR
+  (`PE_LEVANTA_NO_CAMBALEIO`, 10 cm → 4°), e não o contrário.
+
+Por cima dos dois, `_com_os_pes_na_lona` mede os cantos da base depois de
+toda a conta de movimento e sobe o corpo se o mais baixo passou do chão —
+o que, de quebra, faz o giro pivotar no pé de baixo, que é o que um corpo
+que perde a base faz. `tests/test_arena.gd` roda todas as reações quadro
+a quadro e cobra o pé mais baixo.
+
 **No nocaute a câmera AFASTA, não aproxima.** Um corpo em pé é alto e
 estreito; um corpo caído é baixo e largo, e o desenho do nocaute ocupa a
 largura inteira do quadro. Chegando perto — que é o instinto, e o que a

@@ -85,6 +85,7 @@ func run() -> void:
 	_test_paciencia_conta_da_confirmacao()
 	_test_troca_de_caminho_espera_a_volta_fechar()
 	_test_fila_gira_e_nao_repete()
+	_test_porta_espetada_agora_fura_a_fila()
 	_test_hit_fura_fila_de_telemetria()
 	_test_ponte_nao_pula_portas_da_busca()
 	_test_start_exige_apenas_arduino_identificado()
@@ -217,6 +218,68 @@ func _test_varredura_cega_cobre_o_sistema() -> void:
 
 	jogo.porta_configurada = antes
 	jogo._cega_liberada = antes_cega
+
+# ----------------------------------------------------------------------
+#  3b. O CABO ESPETADO AGORA É NOTADO AGORA
+# ----------------------------------------------------------------------
+#
+#  O DEFEITO, e ele era grande: no caminho NATIVO — o normal no Windows —
+#  `_pedir_a_lista` devolvia na primeira linha, sempre. A lista de portas
+#  era pedida UMA vez, no arranque do jogo, e nunca mais. Espetar o
+#  Arduino com o jogo aberto não mudava nada: não havia como o jogo saber
+#  que uma porta nova existia. Ele só tropeçava nela quando a varredura
+#  cega chegasse àquele nome, dezenas de segundos depois — e até lá a
+#  Central dizia "DESCONECTADO" com o cabo na mão de quem estava lendo.
+#
+#  Era uma correção que passou do ponto: a corrida que quebrava a
+#  extensão era enumerar numa THREAD enquanto a principal fazia poll. A
+#  conclusão virou "nunca enumerar", em vez de "enumerar na principal".
+func _test_porta_espetada_agora_fura_a_fila() -> void:
+	var falso := LinkFalso.new()
+	falso.portas = PackedStringArray(["COMVELHA"])
+	_por_link(falso)
+	var antes_fixa: String = jogo.porta_configurada
+	var antes_id: String = jogo.porta_arduino_identificada
+	jogo.porta_configurada = ""
+	jogo.porta_arduino_identificada = ""
+	jogo._porta_recem_chegada = ""
+	jogo.portas_visiveis = PackedStringArray(["COMVELHA"])
+	jogo._lista_comparavel = true
+	jogo._porta_da_vez = 3
+
+	# O cabo entra: o sistema passa a anunciar COMNOVA.
+	jogo._adotar_lista(PackedStringArray(["COMVELHA", "COMNOVA"]))
+	assert(jogo._porta_recem_chegada == "COMNOVA")
+	# A volta recomeça do zero — não se espera a fila chegar lá sozinha.
+	assert(jogo._porta_da_vez == 0)
+	# E a frase na tela fala do cabo, e não de "desconectado".
+	assert("COMNOVA" in jogo.serial_status)
+
+	# Ela fura a fila mesmo com uma porta FIXADA na Central: a escolha do
+	# operador continua valendo, mas o gesto de espetar ganha uma chance.
+	jogo.porta_configurada = "COMFIXA"
+	jogo._falhas_da_porta_fixa = 0
+	var fila: PackedStringArray = jogo._fila_de_tentativas()
+	assert(fila[0] == "COMNOVA")
+	assert(fila.has("COMFIXA"))
+
+	# Uma porta nova que SUMIU no intervalo não prende mais ninguém.
+	jogo.porta_configurada = ""
+	jogo.portas_visiveis = PackedStringArray(["COMVELHA"])
+	fila = jogo._fila_de_tentativas()
+	assert(not fila.has("COMNOVA"))
+
+	# A primeira lista da sessão não pode anunciar novidade nenhuma:
+	# senão todo arranque acharia que o PC inteiro acabou de ser espetado.
+	jogo._lista_comparavel = false
+	jogo._porta_recem_chegada = ""
+	jogo._adotar_lista(PackedStringArray(["COMVELHA", "COMOUTRA"]))
+	assert(jogo._porta_recem_chegada == "")
+
+	jogo.porta_configurada = antes_fixa
+	jogo.porta_arduino_identificada = antes_id
+	jogo._porta_recem_chegada = ""
+	jogo._falhas_da_porta_fixa = 0
 
 # ----------------------------------------------------------------------
 #  4. A PACIÊNCIA CONTA DA CONFIRMAÇÃO, NÃO DO PEDIDO

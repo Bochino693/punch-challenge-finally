@@ -540,11 +540,31 @@ var proxima_tentativa := 0.0
 ##    de trancar (o que devolveria a espera ao jogo), ele simplesmente
 ##    deixa esta volta passar. A próxima vem em um décimo de segundo.
 const ESPERA_DA_LISTA := 2.0
+## NA CENTRAL A LISTA É VIGIADA DE PERTO.
+##
+## É lá que o técnico está com a placa na mão, espetando o cabo e
+## olhando para a tela. Dois segundos de intervalo, somados à volta da
+## fila, faziam a máquina levar dez ou quinze segundos para reagir a um
+## cabo que já estava no lugar — e nesse intervalo a tela dizia
+## "DESCONECTADO", que é a frase mais errada possível para a situação:
+## a placa ESTÁ conectada, quem ainda não sabe é o jogo.
+const ESPERA_DA_LISTA_NA_CENTRAL := 0.6
 var _lista_pedida_em := -99.0
 var _thread_portas: Thread = null
 var _portas_do_fundo := PackedStringArray()
 var _mutex_portas := Mutex.new()
 var _lista_ja_veio := false
+## A primeira lista não tem com o que ser comparada: sem esta bandeira,
+## toda porta que o PC já tinha seria anunciada como recém-chegada no
+## arranque.
+var _lista_comparavel := false
+## A PORTA QUE ACABOU DE APARECER NO SISTEMA — ou seja, o cabo que
+## alguém acabou de espetar. Ela fura a fila: é, de longe, o lugar mais
+## provável de estar a placa.
+var _porta_recem_chegada := ""
+## QUANDO A PLACA FALOU PELA PRIMEIRA VEZ. Só serve para a Central
+## comemorar por um instante — ver `_seletor_porta_refinado`.
+var _placa_achada_em := -99.0
 
 ## 2) DURANTE O SOCO, A BUSCA ESPERA. Quando a porta não está aberta, o
 ##    golpe não vai ser lido de qualquer jeito — reconectar meio segundo
@@ -1709,6 +1729,32 @@ func camera_liberou_a_rodada() -> bool:
 func _arduino_conectado() -> bool:
 	return link != null and link.is_open() and placa_respondeu
 
+## EM QUE PÉ ESTÁ A LIGAÇÃO COM A PLACA — lido do ESTADO, não do texto.
+##
+## A Central escolhia a cor e a animação do seletor procurando pedaços
+## de palavra dentro de `serial_status`: `"PROCURANDO" in serial_status
+## or "CONECTANDO" in ... or "AGUARDANDO" in ...`. É a mesma fragilidade
+## que já custou caro neste arquivo, quando `"CONECTADO" in
+## serial_status` respondia SIM para "DESCONECTADO". E ela tem um
+## sintoma feio: qualquer frase nova em qualquer ponto do encanamento —
+## e há vinte e cinco delas — deixa o indicador apagado, parado, dizendo
+## a cor errada enquanto a máquina trabalha.
+##
+## Estas cinco fases saem das variáveis que mandam de verdade. Texto é
+## para a pessoa ler; a luz do painel vem do estado.
+enum FaseSerial { SEM_CAMINHO, PROCURANDO, OUVINDO, CALIBRANDO, LIGADA }
+
+func fase_serial() -> FaseSerial:
+	if link == null or not link.available():
+		return FaseSerial.SEM_CAMINHO
+	if not link.is_open():
+		return FaseSerial.PROCURANDO
+	# Porta aberta e placa calada: é o estado que mais dura e o que menos
+	# se explicava. Não é "desconectado" — é o jogo com o ouvido na porta.
+	if not placa_respondeu:
+		return FaseSerial.OUVINDO
+	return FaseSerial.CALIBRANDO if placa_calibrando else FaseSerial.LIGADA
+
 func rodada_liberada() -> bool:
 	return _arduino_conectado() and camera_liberou_a_rodada()
 
@@ -2417,6 +2463,21 @@ func _fila_de_tentativas() -> PackedStringArray:
 	# de READY nao ha mais descoberta: esta e a placa que deve ser reaberta.
 	if not porta_arduino_identificada.is_empty():
 		fila.append(porta_arduino_identificada)
+	# A PORTA QUE ACABOU DE APARECER entra antes da fixada — e por isso
+	# sobrevive ao `return` da porta fixa logo abaixo. Um gabinete com a
+	# porta travada na Central continua honrando a escolha do operador,
+	# mas dá uma chance ao cabo que acabou de ser espetado, que é o gesto
+	# que ele está fazendo enquanto olha para a tela.
+	#
+	# E ela só entra se AINDA estiver à vista: uma porta que apareceu e
+	# sumiu no intervalo (o cabo que deu um mau contato) não pode
+	# continuar furando a fila de uma busca que já seguiu em frente.
+	if (
+		not _porta_recem_chegada.is_empty()
+		and portas_visiveis.has(_porta_recem_chegada)
+		and not fila.has(_porta_recem_chegada)
+	):
+		fila.append(_porta_recem_chegada)
 	if not porta_configurada.is_empty():
 		if not fila.has(porta_configurada):
 			fila.append(porta_configurada)
@@ -2499,11 +2560,31 @@ func _pedir_a_lista() -> void:
 	#
 	# A ponte por processo não compartilha um objeto nativo e continua
 	# enumerando no fundo, como antes.
+	#
+	# MAS "NÃO NA THREAD" VIROU "NUNCA MAIS", E ISSO ERA DEMAIS.
+	#
+	# O que a corrida quebrava era chamar `list_ports()` numa thread
+	# secundária ENQUANTO a principal chamava `poll_events()` no mesmo
+	# objeto nativo. A conclusão certa é não usar thread; a que ficou no
+	# código foi não enumerar. Com isso, no caminho nativo — que é o
+	# normal no Windows — a lista de portas era pedida UMA vez, no
+	# arranque, e nunca mais. Espetar o Arduino com o jogo aberto não
+	# mudava nada: o jogo não tinha como saber que uma porta nova
+	# existia, e só a encontrava quando a varredura cega passasse por
+	# cima dela, dezenas de segundos depois. É exatamente o "fica
+	# DESCONECTADO até que uma hora conecta".
+	#
+	# Aqui a enumeração volta, na THREAD PRINCIPAL, entre dois `poll()`.
+	# Não há duas threads no mesmo objeto, que era a causa real. É a
+	# mesma chamada que `_tentar_conectar` já fazia com segurança na
+	# primeira volta.
 	if link != null and link.nome_do_caminho() == SerialLink.CAMINHO_NATIVO:
+		if link.available() and animation_time - _lista_pedida_em >= _espera_da_lista():
+			_adotar_lista(link.list_ports())
 		return
 	if _thread_portas != null or link == null or not link.available():
 		return
-	if animation_time - _lista_pedida_em < ESPERA_DA_LISTA:
+	if animation_time - _lista_pedida_em < _espera_da_lista():
 		return
 	_thread_portas = Thread.new()
 	# O `link` vai AMARRADO na chamada. Se o jogo trocar de caminho no
@@ -2526,10 +2607,48 @@ func _recolher_a_lista() -> void:
 	_thread_portas.wait_to_finish()
 	_thread_portas = null
 	_mutex_portas.lock()
-	portas_visiveis = _portas_do_fundo.duplicate()
+	var achadas := _portas_do_fundo.duplicate()
 	_mutex_portas.unlock()
+	_adotar_lista(achadas)
+
+## DE QUANTO EM QUANTO TEMPO SE OLHA PARA A LISTA DE PORTAS.
+func _espera_da_lista() -> float:
+	return ESPERA_DA_LISTA_NA_CENTRAL if central_aberta else ESPERA_DA_LISTA
+
+## RECEBE A LISTA NOVA E REPARA NO QUE MUDOU.
+##
+## Trocar a lista em silêncio era o que fazia a máquina parecer burra: o
+## cabo entrava, o sistema anunciava uma porta nova, o jogo guardava a
+## porta nova numa variável e continuava a volta de onde estava — podia
+## faltar meia fila até chegar nela, e até lá a tela dizia
+## "DESCONECTADO". Uma porta que NASCE agora é a melhor pista que esta
+## máquina vai ter, e agora ela fura a fila.
+func _adotar_lista(novas: PackedStringArray) -> void:
+	var antes := portas_visiveis
+	portas_visiveis = novas
 	_lista_ja_veio = true
 	_lista_pedida_em = animation_time
+	if not _lista_comparavel:
+		# A primeira lista é o retrato de partida, não uma novidade.
+		_lista_comparavel = true
+		return
+	# A porta que sumiu da lista não vai responder: dizer isso é melhor
+	# do que continuar esperando por ela até a paciência acabar.
+	if not porta_atual.is_empty() and antes.has(porta_atual) and not novas.has(porta_atual):
+		serial_status = "%s SUMIU DA LISTA — O CABO SAIU?" % porta_atual
+	# A porta que acabou de nascer fura a fila.
+	for porta in novas:
+		if antes.has(porta):
+			continue
+		_porta_recem_chegada = porta
+		_porta_da_vez = 0
+		# Largar a porta muda em que estávamos. Só a muda: se a placa já
+		# está falando, uma porta nova é outro aparelho e não interessa.
+		if link != null and link.is_open() and not placa_respondeu:
+			link.close_port()
+		serial_status = "PORTA NOVA: %s — ABRINDO AGORA" % porta
+		proxima_tentativa = animation_time
+		break
 
 func _hora_de_procurar() -> bool:
 	var no_meio_do_golpe := state in [
@@ -2603,9 +2722,7 @@ func _tentar_conectar() -> void:
 	# principal a cada tentativa, que é exatamente o que esta thread veio
 	# evitar.
 	if not _lista_ja_veio:
-		portas_visiveis = link.list_ports()
-		_lista_pedida_em = animation_time
-		_lista_ja_veio = true
+		_adotar_lista(link.list_ports())
 	else:
 		_pedir_a_lista()
 	_fila_de_portas = _fila_de_tentativas()
@@ -2637,11 +2754,20 @@ func _tentar_conectar() -> void:
 		_fila_de_portas = _fila_de_tentativas()
 	var porta := _fila_de_portas[_porta_da_vez]
 	_porta_da_vez += 1
+	# Furar a fila vale UMA vez. Se a placa não estava ali, a porta nova
+	# volta a ser uma porta como as outras e a fila segue normalmente —
+	# senão um adaptador Bluetooth recém-pareado prenderia a busca.
+	var acabou_de_chegar := porta == _porta_recem_chegada
+	if acabou_de_chegar:
+		_porta_recem_chegada = ""
 	var marcada := link.portas_promissoras().has(porta)
-	serial_status = "CONECTANDO %s%s (%d de %d, busca %d)" % [
-		porta, " ✓" if marcada else "",
-		_porta_da_vez, _fila_de_portas.size(), _varreduras + 1
-	]
+	if acabou_de_chegar:
+		serial_status = "ABRINDO %s — PORTA RECÉM-CONECTADA" % porta
+	else:
+		serial_status = "CONECTANDO %s%s (%d de %d, busca %d)" % [
+			porta, " ✓" if marcada else "",
+			_porta_da_vez, _fila_de_portas.size(), _varreduras + 1
+		]
 	_porta_confirmada = false
 	_porta_pedida_em = animation_time
 	_porta_aberta_em = animation_time
@@ -2738,6 +2864,18 @@ func _poll_serial(_delta: float) -> void:
 		# recém-nascido no mesmo quadro só produziria uma desistência
 		# imediata em cima de uma porta que ninguém chegou a abrir.
 		return
+	# NA CENTRAL, A LISTA É VIGIADA MESMO COM UMA PORTA JÁ ABERTA.
+	#
+	# Abaixo, a lista só é pedida no ramo em que NENHUMA porta está
+	# aberta. Mas o caso do técnico é o contrário: o jogo está sentado
+	# numa porta muda, esperando os quatro segundos e meio de paciência,
+	# e é bem nesse intervalo que o cabo entra. Sem isto, a porta nova só
+	# seria notada depois de a paciência acabar — e a tela ficava parada
+	# dizendo que não havia nada. Só enquanto a placa não respondeu: com
+	# a placa falando, mexer na lista não serve para nada.
+	if central_aberta and not placa_respondeu:
+		_recolher_a_lista()
+		_pedir_a_lista()
 	if not link.is_open():
 		_recolher_a_lista()
 		if _thread_portas == null and animation_time >= proxima_tentativa and _hora_de_procurar():
@@ -2923,7 +3061,23 @@ func _on_serial_closed(_porta: String) -> void:
 			_caminho_provado = false
 			_troca_de_caminho_pendente = true
 			_quedas_do_caminho.clear()
-	serial_status = "DESCONECTADO"
+	# "DESCONECTADO" ERA A FRASE ERRADA, E ERA A QUE MAIS SE VIA.
+	#
+	# Ela é um veredito — soa como fim de linha, como se não houvesse
+	# nada acontecendo — e era o que a Central mostrava justamente nos
+	# segundos em que a máquina mais trabalha: logo depois de a porta
+	# cair, com a reconexão já marcada para daqui a um décimo de
+	# segundo. Quem estava com o cabo na mão lia "desconectado" e
+	# concluía que o jogo tinha desistido.
+	#
+	# Estas duas dizem o que aconteceu e o que vem a seguir, que é a
+	# única coisa que alguém na frente do gabinete quer saber.
+	if _porta.is_empty():
+		serial_status = "PROCURANDO A PLACA…"
+	elif estava_falando:
+		serial_status = "A PLACA CAIU EM %s — RECONECTANDO" % _porta
+	else:
+		serial_status = "%s FECHOU — SEGUINDO A BUSCA" % _porta
 	# Se esta porta ja disse READY,PUNCH_MPU6050, o problema nao e
 	# descoberta. Reabre a mesma COM primeiro, sem reiniciar a varredura em
 	# portas que sabemos nao serem a placa.
@@ -2977,6 +3131,23 @@ func _on_serial_line(line: String) -> void:
 	if not placa_respondeu:
 		placa_respondeu = true
 		serial_status = "CONECTADO %s" % porta_atual
+		# O MOMENTO EM QUE A PLACA FALA MERECE SER VISTO E OUVIDO.
+		#
+		# É o instante que o técnico está esperando de olho na tela, e
+		# até aqui ele era uma linha de status trocando em corpo 14 —
+		# invisível se a pessoa estava olhando para o conector, que é
+		# exatamente onde ela está olhando. `_show_notice` não serve:
+		# a faixa de aviso foi removida da tela do jogo a pedido, e a
+		# chamada não desenha mais nada.
+		#
+		# O que serve é marcar a HORA e deixar o seletor da Central
+		# comemorar por um segundo e meio (ver `_seletor_porta_refinado`),
+		# com um toque curto para quem não estava olhando.
+		#
+		# E é honesto: nada disso sai antes daqui, porque antes daqui não
+		# há prova nenhuma de que o que está na porta seja a placa.
+		_placa_achada_em = animation_time
+		sons.play("menu", -10.0)
 	match str(msg["type"]):
 		"READY":
 			serial_status = "CONECTADO %s" % porta_atual
@@ -6256,12 +6427,20 @@ func _stepper(chave: String, valor: String, legenda: String, accent: Color) -> v
 func _seletor_porta_refinado() -> void:
 	var r: Rect2 = PASSOS["porta"]
 	var visor := _passo_visor("porta")
-	var ligado := _sensor_ligado()
-	var procurando := (
-		"PROCURANDO" in serial_status or "CONECTANDO" in serial_status
-		or "AGUARDANDO" in serial_status or "VERIFICANDO" in serial_status
-	)
-	var cor := Paleta.VERDE if ligado else (Paleta.CIANO if procurando else Paleta.AMBAR)
+	# A COR E A ANIMAÇÃO VÊM DA FASE, e não de procurar palavras dentro
+	# do texto da tela. Ver `fase_serial`.
+	var fase := fase_serial()
+	var procurando := fase in [FaseSerial.PROCURANDO, FaseSerial.OUVINDO]
+	var cor := Paleta.AMBAR
+	match fase:
+		FaseSerial.LIGADA:
+			cor = Paleta.VERDE if _sensor_ligado() else Paleta.CIANO
+		FaseSerial.CALIBRANDO:
+			cor = Paleta.AMBAR
+		FaseSerial.PROCURANDO, FaseSerial.OUVINDO:
+			cor = Paleta.CIANO
+		FaseSerial.SEM_CAMINHO:
+			cor = Paleta.VERMELHO
 
 	_cartao(r.grow(7.0), Color("12070d"), Color(cor, 0.42), 1.0, 1.5)
 	draw_rect(Rect2(r.position.x - 7.0, r.position.y + 10.0, 3.0, r.size.y - 20.0), Color(cor, 0.90))
@@ -6270,7 +6449,16 @@ func _seletor_porta_refinado() -> void:
 	_cartao(visor, Color("190b12"), Color(cor, 0.22), 1.0, 0.0)
 
 	var centro := Vector2(visor.position.x + 27.0, visor.get_center().y)
-	draw_circle(centro, 5.0, Color(cor, 0.20), true, -1.0, true)
+	# A COMEMORAÇÃO: um anel que abre a partir da lâmpada no instante em
+	# que a placa responde. Dura um segundo e meio e serve a uma coisa
+	# só — quem estava olhando para o conector, e não para a tela, vê
+	# pelo canto do olho que a máquina achou.
+	var festa := clampf(1.0 - (animation_time - _placa_achada_em) / 1.5, 0.0, 1.0)
+	if festa > 0.0:
+		var onda := ease(1.0 - festa, 0.4)
+		draw_arc(centro, 9.0 + onda * 18.0, 0.0, TAU, 28,
+			Color(Paleta.VERDE, festa * 0.75), 2.0 + festa * 1.5, true)
+	draw_circle(centro, 5.0 + festa * 3.0, Color(cor, 0.20 + festa * 0.5), true, -1.0, true)
 	draw_circle(centro, 2.4, cor, true, -1.0, true)
 	if procurando:
 		var inicio := fmod(animation_time * 3.2, TAU)

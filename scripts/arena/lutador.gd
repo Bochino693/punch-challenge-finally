@@ -129,6 +129,31 @@ const PIXEL_NO_MUNDO := ALTURA_DA_FIGURA / (SOLA_DO_PE_PX - TOPO_DA_CABECA_PX + 
 ## porque a câmera e os testes precisam dele.
 const ALTURA_DO_QUADRO := ALTURA_DA_FOLHA * PIXEL_NO_MUNDO
 
+## ------------------------------------------------------- a base dos pés
+##
+## QUANTO O DESENHO SE ABRE NO CHÃO, medido na faixa dos pés (linhas 395
+## a 425) de todas as poses: o ponto mais distante do centro da célula
+## está a 165 px, na pose `direto`, que é a mais aberta. Em metros, a
+## base do lutador tem 1,42 m de ponta a ponta.
+##
+## ISTO NÃO É DECORAÇÃO: é o número que decide quanto o corpo pode
+## inclinar. Um desenho é RÍGIDO — inclinar a figura de um ângulo φ
+## levanta um pé e ENTERRA O OUTRO em `meia_base × sen φ`. Com a base de
+## 71 cm que esta arte tem, o balanço lateral de 0,18 rad que o cambaleio
+## usava afundava um pé 12,7 cm dentro da lona, e a lona o cortava. Era
+## isso que se via no movimento: o pé descendo e sumindo.
+const MEIA_BASE_PX := 165.0
+const MEIA_BASE_DOS_PES := PIXEL_NO_MUNDO * MEIA_BASE_PX
+
+## Quanto um pé pode SAIR da lona no cambaleio, em metros.
+##
+## Escolhe-se o levantar, e o ângulo é consequência — o contrário do que
+## estava aqui, que escolhia o ângulo e descobria o afundamento depois.
+## Com a sola presa na lona (ver `_com_os_pes_na_lona`), o pé de trás
+## sobe o dobro do que o de frente afundaria, então é este número, e não
+## o ângulo, que diz o que se vai ver.
+const PE_LEVANTA_NO_CAMBALEIO := 0.10
+
 var _figura: AnimatedSprite3D = null
 var _corpo: Node3D = null
 var _frames: SpriteFrames = null
@@ -386,8 +411,17 @@ func _mostrar(indice: int) -> void:
 ##   coisa aqui que não volta sozinha — ela espera o `get_up`.
 func _mover_o_corpo() -> void:
 	var t := _descanso
-	# respiração
-	var ar := sin(_relogio * 2.1) * 0.014 + sin(_relogio * 0.7) * 0.006
+	# A RESPIRAÇÃO SÓ SOBE, e essa é a correção menos visível e mais
+	# constante desta página.
+	#
+	# Ela era um seno em torno de zero: METADE DE CADA CICLO puxava o
+	# corpo dois centímetros PARA BAIXO da lona, e a lona — que fica na
+	# frente do desenho — comia a sola durante essa metade. O pé
+	# "piscava" contra a borda do tapete o tempo todo, parado, sem
+	# ninguém bater. `(1 − cos)/2` tem o mesmo período e a mesma
+	# amplitude, mas vai de 0 a 1: o corpo sobe e volta ao repouso, que é
+	# exatamente onde a sola encosta no chão.
+	var ar := (1.0 - cos(_relogio * 2.1)) * 0.007 + (1.0 - cos(_relogio * 0.7)) * 0.003
 	t.origin.y += ar
 	t.origin.x += sin(_relogio * 0.43) * 0.012
 
@@ -402,7 +436,13 @@ func _mover_o_corpo() -> void:
 		# "levou um soco" de "perdeu a base".
 		if _papel == "stagger":
 			t.origin.x += sin(_tempo_no_papel * 11.0) * 0.06 * impacto
-			t.basis = t.basis.rotated(Vector3.FORWARD, _lado * 0.18 * impacto)
+			t.basis = t.basis.rotated(
+				Vector3.FORWARD, _lado * giro_do_cambaleio() * impacto
+			)
+
+	# NENHUM PÉ ATRAVESSA A LONA — e esta linha vem ANTES do tombo de
+	# propósito: o tombo do nocaute afunda o corpo porque é para afundar.
+	t = _com_os_pes_na_lona(t)
 
 	# O TOMBO — e ele é MENOS do que parece necessário.
 	#
@@ -422,6 +462,49 @@ func _mover_o_corpo() -> void:
 		# "desapareceu para baixo".
 		t.origin.y += sin(clampf((queda - 0.82) / 0.18, 0.0, 1.0) * PI) * 0.035
 	_corpo.transform = t
+
+## O ÂNGULO DO BALANÇO LATERAL DO CAMBALEIO.
+##
+## Sai do quanto se quer ver o pé levantar, e não o contrário. Com a
+## sola presa na lona, inclinar de φ levanta o pé de trás em
+## `2 × meia_base × sen φ`; invertendo, o ângulo é
+## `asin(levantada / (2 × meia_base))`. Com a arte atual dá 4°, contra
+## os 10° que estavam escritos à mão e enterravam o outro pé 13 cm.
+static func giro_do_cambaleio() -> float:
+	return asin(clampf(PE_LEVANTA_NO_CAMBALEIO / (2.0 * MEIA_BASE_DOS_PES), 0.0, 1.0))
+
+## A TRAVA: O CORPO INCLINA, MAS O PÉ NÃO ENTRA NO CHÃO.
+##
+## Por que uma trava e não só um ângulo menor. Um ângulo menor conserta
+## o cambaleio de hoje e não impede o próximo ajuste de reabrir o mesmo
+## buraco — e o buraco não é óbvio: ele não aparece como pé enterrado,
+## aparece como pé CORTADO, porque a lona está na frente do desenho e o
+## esconde. Foi assim que a respiração afundava a sola metade do tempo
+## sem ninguém desconfiar.
+##
+## A trava mede os dois cantos da base do lutador depois de toda a
+## inclinação e translação, e se o mais baixo ficou abaixo da lona sobe
+## o corpo exatamente o que faltava. O resultado é o giro passar a
+## pivotar no pé de baixo — que é o que um corpo que perde a base faz —
+## em vez de pivotar no ar, no meio da figura.
+func _com_os_pes_na_lona(t: Transform3D) -> Transform3D:
+	var esquerdo := t * Vector3(-MEIA_BASE_DOS_PES, 0.0, 0.0)
+	var direito := t * Vector3(MEIA_BASE_DOS_PES, 0.0, 0.0)
+	var mais_baixo := minf(esquerdo.y, direito.y)
+	if mais_baixo < 0.0:
+		t.origin.y -= mais_baixo
+	return t
+
+## A ALTURA DO PÉ MAIS BAIXO. Fora do tombo ela nunca pode ser negativa
+## — é o contrato que o teste confere.
+func pe_mais_baixo() -> float:
+	if _corpo == null:
+		return 0.0
+	var t := _corpo.transform
+	return minf(
+		(t * Vector3(-MEIA_BASE_DOS_PES, 0.0, 0.0)).y,
+		(t * Vector3(MEIA_BASE_DOS_PES, 0.0, 0.0)).y
+	)
 
 ## A COR DA ILUSTRAÇÃO responde a duas coisas: o clarão do soco, que
 ## acende tudo por um instante, e o dano acumulado, que puxa devagar
