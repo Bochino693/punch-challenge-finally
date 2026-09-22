@@ -46,6 +46,78 @@ Assim o gabinete liga e o jogo sobe direto do disco: nao extrai nada,
 nao copia nada, nao tem tela preta de descompactacao.
 
 
+OS PASSOS, DO ZERO, SEM ATALHO
+-------------------------------
+VOCE NAO CRIA PASTA NENHUMA E NAO COPIA DLL A MAO. A exportacao ja
+monta a pasta inteira com tudo dentro. O erro classico -- e o que faz a
+camera sumir no outro PC -- e exportar e depois pegar SO o .exe de la.
+
+De onde saem as DLLs: elas ja estao no projeto, versionadas, e o
+exportador do Godot as copia sozinho preservando o caminho que o
+.gdextension declara a partir de res://.
+
+  no projeto                              ->  na pasta exportada
+  addons\CameraServerExtension\x86_64\...  ->  o MESMO caminho, ao lado do exe
+  addons\gdserial\bin\windows-x86_64\...   ->  o MESMO caminho, ao lado do exe
+
+1. No PC de desenvolvimento, na raiz do projeto:
+
+     powershell -ExecutionPolicy Bypass -File tools\exportar_windows.ps1
+
+   Isso exporta, poe cada DLL no caminho certo, traz o vcruntime140.dll
+   do sistema, confere arquivo por arquivo e fecha
+   build\PunchChallenge-Windows-x64.zip.
+
+2. Leve o ZIP para o PC do gabinete e extraia em qualquer lugar.
+   NAO abra o jogo ainda.
+
+3. Dentro da pasta extraida:
+
+     powershell -ExecutionPolicy Bypass -File instalar_startup.ps1
+
+   Ele confere as quatro pecas essenciais, copia tudo para
+   %LOCALAPPDATA%\PunchChallenge, tira a marca de "baixado da internet"
+   das DLLs, registra a abertura automatica no logon e termina
+   diagnosticando a camera nesta maquina.
+
+4. Reinicie. O jogo tem de subir sozinho.
+
+Para testar sem reiniciar:
+     Start-Process "$env:LOCALAPPDATA\PunchChallenge\PunchChallenge.exe"
+
+Para diagnosticar so a camera, sem instalar nada:
+     powershell -ExecutionPolicy Bypass -File instalar_startup.ps1 -Conferir
+
+Para desfazer a abertura automatica:
+     powershell -ExecutionPolicy Bypass -File instalar_startup.ps1 -Desinstalar
+
+
+A ARVORE DO PACOTE -- E O QUE NAO PODE FALTAR
+----------------------------------------------
+build\windows\
+  PunchChallenge.exe                  o jogo
+  PunchChallenge.pck                  TODO o conteudo (cenas, arte, som)
+  PunchChallenge.console.exe          versao com console, para depurar
+  vcruntime140.dll                    runtime do sensor (dispensa o redist)
+  addons\
+    CameraServerExtension\x86_64\
+      libcameraserver-extension.windows.dll      A CAMERA
+    gdserial\bin\windows-x86_64\
+      gdserial.dll                               O ARDUINO
+  instalar_startup.ps1
+  LEIA-ANTES-DE-EXECUTAR.txt
+
+AS QUATRO PECAS ESSENCIAIS sao o .exe, o .pck e as duas DLLs. Faltando
+o .pck o jogo nem abre -- e o unico erro barulhento do conjunto.
+Faltando qualquer uma das DLLs o jogo abre NORMALMENTE e em silencio,
+so que sem camera ou sem sensor.
+
+E AS DLLS FICAM EM SUBPASTAS, nao soltas ao lado do .exe. O caminho e o
+mesmo que o .gdextension declara a partir de res://, e o carregador
+procura exatamente ali. Uma DLL certa na pasta errada e igual a uma DLL
+ausente.
+
+
 O QUE CADA SCRIPT FAZ
 ----------------------
 tools/exportar_windows.ps1
