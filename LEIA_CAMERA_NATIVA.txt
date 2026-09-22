@@ -2,6 +2,53 @@ CAMERA NATIVA - WINDOWS - GODOT 4.6
 
 Esta versao nao usa Python nem OpenCV para a camera.
 
+DA PARA LEVAR SO O EXECUTAVEL? NAO.
+Nao e escolha nossa nem configuracao que falta marcar. O Godot carrega
+GDExtension com LoadLibrary do Windows, que exige um ARQUIVO REAL no
+disco; um .dll dentro do .pck (ou do .exe, com o PCK embutido) nao tem
+caminho de disco e nao carrega. Marcar "Embed PCK" nao muda nada: junta
+o .pck ao .exe e a DLL continua do lado de fora.
+
+E o sintoma e traicoeiro: o jogo ABRE NORMALMENTE, sem camera e SEM
+ERRO. Por isso "copiaram so o EXE" e o defeito numero um deste projeto.
+
+A unidade de distribuicao e a PASTA. Para conferir a maquina de destino
+ANTES de montar o gabinete, na propria pasta copiada:
+
+    powershell -ExecutionPolicy Bypass -File instalar_startup.ps1 -Conferir
+
+Ele responde as cinco perguntas na ordem certa: a DLL veio junto? e
+x86_64? este Windows tem Media Foundation? a privacidade da webcam esta
+aberta? o Windows enxerga alguma camera? So depois da quinta e que
+"confira o cabo" vira uma acusacao honesta.
+
+A CAMERA USB SEMPRE VENCE A DO NOTEBOOK
+O gabinete usa uma webcam USB, e e ela que tem de entrar no jogo mesmo
+num notebook que ja tem camera. Media Foundation entrega o nome amigavel
+e nada mais -- e nem o barramento ajudaria, porque a embutida do
+notebook TAMBEM e USB, ligada num hub interno. O jogo decide por quatro
+sinais, nesta ordem de peso:
+
+  1. ESPETADA AGORA. A camera que nasce com o jogo JA ABERTO e a
+     externa, sempre -- a embutida estava la desde que o Windows subiu.
+     E o sinal mais forte e nao depende de nome nenhum. Na duvida, abra
+     o jogo e SO ENTAO espete a USB: ela vence qualquer outra;
+  2. nome de quem vende webcam avulsa (Logitech, LifeCam, Brio, C920,
+     Elgato, Razer, Intelbras...);
+  3. nome de quem fabrica modulo embutido (Chicony, Sunplus, Quanta,
+     Azurewave, Bison, Syntek, Realtek, EasyCamera, TrueVision...) --
+     penalidade pesada;
+  4. em empate, a ultima da lista: o Windows enumera a embutida antes.
+
+A PRIVACIDADE E LIBERADA SOZINHA
+Com a extensao carregada e nenhuma camera aparecendo por tres segundos,
+o jogo grava "Allow" no interruptor de privacidade da webcam, no ramo do
+USUARIO. E o mesmo valor que o aplicativo Configuracoes grava quando
+alguem move o interruptor a mao: nao pede administrador, nao mexe na
+maquina inteira e e reversivel pelo mesmo lugar. Antes disso era preciso
+descobrir o F9 e apertar RESOLVER ACESSO -- e quem esta montando um
+gabinete em outra cidade nao descobre.
+
 COMO FUNCIONA
 - O jogo usa Windows Media Foundation por uma extensao nativa incluida.
 - Basta conectar uma webcam USB e abrir o jogo.
@@ -37,6 +84,23 @@ E ela se perde facil, por tres motivos, nesta ordem:
      e a outra extensao, a do Arduino -- e o script de exportacao ja leva
      esse arquivo na pasta, dispensando o instalador do redistributable.
   3. WINDOWS ARM64 (Snapdragon). A extensao so traz x86_64.
+
+A FRASE DA TELA AGORA APONTA A CAUSA CERTA
+Ate aqui, sem a extensao carregada o jogo dizia "CAMERA INDISPONIVEL --
+RECONECTE O CABO USB". Era uma acusacao FALSA, e a pior possivel: manda
+mexer no cabo quando o problema e um arquivo que nao veio na copia.
+Quem leva o jogo para outro PC troca de porta, troca de cabo, troca de
+camera, e nada disso tem a menor chance de funcionar. Agora sao tres
+frases, uma por causa:
+
+  FALTA A DLL DA CAMERA -- COPIE A PASTA INTEIRA, NAO SO O EXE
+      o arquivo nao esta ao lado do executavel;
+  A DLL DA CAMERA NAO CARREGOU -- WINDOWS SEM MEDIA FOUNDATION
+  (EDICAO N) OU ARM64
+      o arquivo ESTA la e mesmo assim nao subiu: e o Windows da maquina;
+  CONECTE UMA CAMERA USB -- BUSCANDO...
+      a extensao esta no ar e nao ha camera. Agora sim e cabo, porta ou
+      driver.
 
 COMO CONFERIR EM DEZ SEGUNDOS
 Abra F9 > CAMERA E SOM. A linha EXTENSAO NATIVA DA CAMERA diz tudo:

@@ -25,13 +25,15 @@
         -SoRegistrar        nao copia nada, so registra a abertura automatica
         -Desinstalar        tira a abertura automatica (nao apaga os arquivos)
         -Apagar             com -Desinstalar, apaga tambem a pasta instalada
+        -Conferir           so diagnostica a CAMERA nesta maquina e sai
 #>
 param(
     [string]$Origem = "",
     [string]$Destino = "",
     [switch]$SoRegistrar,
     [switch]$Desinstalar,
-    [switch]$Apagar
+    [switch]$Apagar,
+    [switch]$Conferir
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,6 +72,119 @@ function Remover-Abertura-Automatica() {
         $tirou = $true
     }
     if (-not $tirou) { Write-Host "    nao havia abertura automatica registrada" }
+}
+
+# ----------------------------------------------------------- a camera
+#
+# POR QUE ISTO VIVE AQUI, E NAO SO DENTRO DO JOGO.
+#
+# "A camera nao funciona nessa maquina" e o defeito que mais custou
+# tempo neste projeto, e ele tem cinco causas possiveis -- quatro delas
+# do WINDOWS da maquina de destino, nenhuma do cabo. Descobrir qual e
+# DEPOIS de montar o gabinete, pelo F9 do jogo, e tarde: a conferencia
+# tem de caber antes, na mesma pasta que acabou de ser copiada, sem
+# abrir o jogo.
+function Conferir-Camera([string]$pasta) {
+    $ok = $true
+    Passo "conferindo a camera nesta maquina"
+
+    # 1. A DLL veio junto? E o caso numero um: copiaram so o EXE.
+    $dll = Join-Path $pasta "addons\CameraServerExtension\x86_64\libcameraserver-extension.windows.dll"
+    if (Test-Path -LiteralPath $dll) {
+        Write-Host "    ok   a DLL da camera esta na pasta"
+    } else {
+        Write-Host "    FALTA a DLL da camera" -ForegroundColor Red
+        Write-Host "         $dll"
+        Write-Host "         O jogo abre igual, SEM camera e SEM erro. Copie a pasta INTEIRA."
+        return $false
+    }
+
+    # 2. Ela e x86_64? Um binario de outra arquitetura falha exatamente
+    #    como um arquivo ausente: LoadLibrary recusa em silencio.
+    $fs = [System.IO.File]::OpenRead($dll)
+    try {
+        $buf = New-Object byte[] 4
+        $fs.Position = 0x3C; [void]$fs.Read($buf, 0, 4)
+        $fs.Position = [BitConverter]::ToInt32($buf, 0) + 4
+        [void]$fs.Read($buf, 0, 2)
+        $maquina = [BitConverter]::ToUInt16($buf, 0)
+    } finally { $fs.Dispose() }
+    if ($maquina -eq 0x8664) {
+        Write-Host "    ok   a DLL e x86_64"
+    } else {
+        Write-Host ("    RUIM a DLL nao e x86_64 (machine 0x{0:X})" -f $maquina) -ForegroundColor Red
+        $ok = $false
+    }
+    if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
+        Write-Host "    RUIM este Windows e ARM64 e a extensao so traz x86_64" -ForegroundColor Red
+        $ok = $false
+    }
+
+    # 3. O Windows tem Media Foundation? As edicoes N e KN da Europa e o
+    #    Windows Server sem o recurso de midia nao tem -- e a DLL da
+    #    camera chama MF.dll, MFPlat.dll e MFReadWrite.dll diretamente.
+    $faltaMF = @()
+    foreach ($nome in @("MF.dll", "MFPlat.dll", "MFReadWrite.dll")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot "System32\$nome"))) { $faltaMF += $nome }
+    }
+    if ($faltaMF.Count -eq 0) {
+        Write-Host "    ok   Media Foundation presente"
+    } else {
+        Write-Host "    RUIM falta Media Foundation: $($faltaMF -join ', ')" -ForegroundColor Red
+        Write-Host "         Edicao N/KN ou Windows Server: instale o Media Feature Pack."
+        $ok = $false
+    }
+
+    # 4. A privacidade da webcam esta aberta para programas de area de
+    #    trabalho? O jogo libera isso sozinho, mas dizer aqui evita a
+    #    caca ao tesouro.
+    $consent = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\webcam\NonPackaged"
+    $valor = (Get-ItemProperty -Path $consent -Name Value -ErrorAction SilentlyContinue).Value
+    if ($valor -eq "Deny") {
+        Aviso "a privacidade da webcam esta BLOQUEADA para programas de area de trabalho."
+        Aviso "O jogo tenta liberar sozinho no arranque; se nao conseguir, abra"
+        Aviso "Configuracoes > Privacidade > Camera e ligue o interruptor."
+    } else {
+        Write-Host "    ok   privacidade da webcam liberada ($(if ($valor) { $valor } else { 'padrao' }))"
+    }
+
+    # 5. O Windows enxerga alguma camera? Se nao enxerga, ai sim e cabo,
+    #    porta USB ou driver -- e so aqui essa acusacao e honesta.
+    $cams = @()
+    try {
+        $saida = & pnputil.exe /enum-devices /class Camera /connected 2>$null
+        foreach ($linha in $saida) {
+            if ($linha -match "Instance ID:\s*(.+)$" -or $linha -match "Inst.ncia:\s*(.+)$") {
+                $cams += $Matches[1].Trim()
+            }
+        }
+    } catch { }
+    if ($cams.Count -gt 0) {
+        Write-Host "    ok   o Windows ve $($cams.Count) camera(s):"
+        foreach ($c in $cams) {
+            $barramento = if ($c -like "USB\*") { "USB" } else { "outro barramento" }
+            Write-Host "         $barramento  $c"
+        }
+        if ($cams.Count -gt 1) {
+            Write-Host "         Ha mais de uma. O jogo prefere a externa; se ele pegar a"
+            Write-Host "         errada, espete a USB com o jogo JA ABERTO -- a que nasce"
+            Write-Host "         depois vence qualquer nome."
+        }
+    } else {
+        Aviso "o Windows nao enumerou camera nenhuma (ou este Windows nao tem pnputil)."
+        Aviso "Se o Gerenciador de Dispositivos tambem nao mostra, ai e cabo, porta ou driver."
+    }
+    return $ok
+}
+
+if ($Conferir) {
+    $alvo = if ($Origem) { $Origem } else { $PSScriptRoot }
+    if (-not (Test-Path -LiteralPath (Join-Path $alvo $EXE))) {
+        $alt = Join-Path $alvo "build\windows"
+        if (Test-Path -LiteralPath (Join-Path $alt $EXE)) { $alvo = $alt }
+    }
+    if (Conferir-Camera $alvo) { Write-Host "CAMERA_OK" } else { Write-Host "CAMERA_COM_PROBLEMA" }
+    exit 0
 }
 
 if ($Desinstalar) {
@@ -188,6 +303,12 @@ if ($tarefa) {
     $run = Get-ItemProperty -Path $CHAVE_RUN -Name $TAREFA -ErrorAction SilentlyContinue
     if ($run) { Write-Host "    Run: $($run.$TAREFA)" } else { throw "Nada ficou registrado." }
 }
+
+# A CONFERENCIA DA CAMERA FECHA A INSTALACAO. E o momento certo: a
+# pasta acabou de ser copiada para esta maquina, e e desta maquina que
+# se trata a pergunta.
+Write-Host ""
+Conferir-Camera $Destino | Out-Null
 
 Write-Host ""
 Write-Host "INSTALADO_OK $Destino"
