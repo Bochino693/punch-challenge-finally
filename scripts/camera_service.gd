@@ -76,6 +76,21 @@ var _assinatura_do_quadro := 0
 var _ultima_mudanca_ms := 0
 var _ultima_quantidade_feeds := -1
 
+## A PRIVACIDADE JÁ FOI LIBERADA NESTA SESSÃO? Uma vez basta, e mais de
+## uma seria mexer no registro a cada volta da busca.
+var _privacidade_liberada := false
+## Quando a busca começou. Só depois de alguns segundos sem achar nada é
+## que vale a pena mexer na privacidade — uma webcam USB pode levar um
+## tempo para o Windows montar.
+var _busca_comecou_ms := 0
+## OS NOMES DE CÂMERA QUE O SISTEMA JÁ MOSTRAVA. Serve para reconhecer a
+## que ACABOU DE SER ESPETADA: num notebook, a que nasce depois do jogo
+## aberto é a USB externa, sempre.
+var _cameras_conhecidas := PackedStringArray()
+var _lista_comparavel := false
+## E as que apareceram DEPOIS: a lista que decide a preferência.
+var _recem_chegadas := PackedStringArray()
+
 var _melhor_imagem: Image = null
 var _melhor_nota := -1.0
 var _obturador_ate_ms := 0
@@ -161,37 +176,105 @@ func _descobrir_cameras(recriar_extensao: bool) -> void:
 func extensao_nativa_presente() -> bool:
 	return ClassDB.class_exists(&"CameraServerExtension")
 
+## ONDE A DLL DA CÂMERA DEVERIA ESTAR, ao lado do executável.
+##
+## O `.gdextension` declara este caminho a partir de `res://`, e o
+## exportador do Godot copia a biblioteca preservando a estrutura. Numa
+## build exportada, portanto, ela fica exatamente aqui — e procurar o
+## ARQUIVO é o que separa "não copiaram" de "copiaram e não carregou",
+## que são dois problemas com duas soluções completamente diferentes.
+const CAMINHO_DA_DLL := "addons/CameraServerExtension/x86_64/libcameraserver-extension.windows.dll"
+
+func _dll_da_camera_esta_no_disco() -> bool:
+	return FileAccess.file_exists(
+		OS.get_executable_path().get_base_dir().path_join(CAMINHO_DA_DLL)
+	)
+
 ## SEM CÂMERA: POR QUÊ, EM UMA FRASE QUE RESOLVE.
 ##
 ## Vazio quer dizer "é mesmo falta de câmera, procure uma". Qualquer outra
 ## coisa é a máquina apontando o próprio defeito.
+##
+## AQUI MORAVA UMA ACUSAÇÃO FALSA, e ela custou uma máquina inteira.
+## Sem a extensão carregada, esta função devolvia "CÂMERA INDISPONÍVEL —
+## RECONECTE O CABO USB" — mandando conferir o cabo quando o problema é
+## que um arquivo não veio na cópia. É exatamente o defeito que o
+## cabeçalho deste arquivo diz ter corrigido, com a frase trocada e a
+## acusação intacta: quem leva o jogo para outro PC mexe no cabo, troca
+## de porta USB, troca de câmera, e nada disso tem a menor chance de
+## funcionar.
+##
+## Agora as três causas são separadas, e cada uma diz o que fazer.
 func _diagnostico_da_plataforma() -> String:
 	if OS.get_name() != "Windows":
 		return ""
 	if extensao_nativa_presente():
 		return ""
-	# Aqui está a resposta para "funciona na minha máquina e em nenhuma
-	# outra": sem a extensão, o Windows não tem câmera nenhuma para o
-	# Godot, nem a embutida do notebook.
-	return "CÂMERA INDISPONÍVEL — RECONECTE O CABO USB"
+	# No editor não há "pasta exportada" para conferir, e a extensão pode
+	# estar simplesmente desligada no projeto. Não se inventa causa.
+	if OS.has_feature("editor"):
+		return "EXTENSÃO DA CÂMERA NÃO CARREGADA NO EDITOR"
+	if not _dll_da_camera_esta_no_disco():
+		# O caso número um, de longe: copiaram só o .exe. O jogo abre
+		# igual, sem câmera e sem erro — e por isso ninguém desconfia do
+		# arquivo que ficou para trás.
+		return "FALTA A DLL DA CÂMERA — COPIE A PASTA INTEIRA, NÃO SÓ O EXE"
+	# O arquivo está lá e mesmo assim não carregou. Sobram duas causas, e
+	# as duas são do WINDOWS da máquina, não do cabo nem da câmera.
+	return "A DLL DA CÂMERA NÃO CARREGOU — WINDOWS SEM MEDIA FOUNDATION (EDIÇÃO N) OU ARM64"
+
+## OS NOMES QUE UMA CÂMERA EMBUTIDA DE NOTEBOOK USA.
+##
+## Media Foundation entrega o nome amigável e nada mais — não diz em que
+## barramento o dispositivo está, e mesmo que dissesse não ajudaria: a
+## webcam embutida de um notebook TAMBÉM é USB, ligada num hub interno.
+## O que separa uma da outra é o nome, e o nome vem do fabricante do
+## MÓDULO, não da marca do notebook: Chicony, Sunplus, Quanta,
+## Azurewave, Bison, Syntek e Realtek fabricam quase todas as embutidas
+## do mercado, e nenhuma delas vende webcam avulsa.
+const NOMES_DE_EMBUTIDA := [
+	"integrated", "integrada", "built-in", "builtin", "internal",
+	"user facing", "front", "facetime", "ir camera", "infrared",
+	"windows hello", "easycamera", "truevision", "hd webcam",
+	"chicony", "sunplus", "quanta", "azurewave", "bison", "syntek",
+	"realtek", "vimicro", "sonix", "lite-on", "liteon", "acer crystal",
+]
+
+## E OS NOMES DE QUEM VENDE WEBCAM AVULSA.
+const NOMES_DE_EXTERNA := [
+	"usb", "logitech", "webcam", "external", "externa", "capture",
+	"brio", "c920", "c922", "c930", "c270", "streamcam",
+	"microsoft lifecam", "lifecam", "razer", "elgato", "aukey",
+	"trust", "genius", "multilaser", "intelbras", "hikvision",
+]
 
 ## ESCOLHE A WEBCAM EXTERNA, NÃO A CÂMERA DO NOTEBOOK.
-## Media Foundation fornece o nome amigável, mas não expõe o barramento ao
-## GDScript. Os nomes abaixo cobrem as denominações usadas pelos notebooks;
-## USB, marcas de webcam e dispositivos conectados depois recebem prioridade.
+##
+## A regra vale mesmo quando o notebook já tem câmera: o gabinete usa uma
+## USB, e é ela que tem de entrar no jogo. Quatro sinais, nesta ordem de
+## peso:
+##
+##   1. ESPETADA AGORA. A câmera que NASCE com o jogo já aberto é a
+##      externa — a embutida estava lá desde que o Windows subiu. É o
+##      sinal mais forte que existe e não depende de nome nenhum;
+##   2. o nome é de quem vende webcam avulsa;
+##   3. o nome é de quem fabrica módulo embutido — penalidade pesada;
+##   4. em empate, a última da lista: o Windows costuma enumerar a
+##      embutida primeiro.
 func _indice_camera_usb(feeds: Array) -> int:
 	if feeds.is_empty():
 		return -1
 	var melhor := -1
 	var melhor_nota := -100000
 	for i in range(feeds.size()):
-		var feed = feeds[i]
-		var nome := str(feed.get_name()).to_lower() if feed != null and feed.has_method("get_name") else ""
-		var nota := i * 10 # em empate, a conectada por último normalmente é a USB
-		for termo in ["usb", "logitech", "webcam", "external", "externa", "capture"]:
+		var nome := _nome_do_feed(feeds[i])
+		var nota := i * 10
+		if _recem_chegadas.has(nome):
+			nota += 50000
+		for termo in NOMES_DE_EXTERNA:
 			if str(termo) in nome:
 				nota += 1000
-		for termo in ["integrated", "integrada", "built-in", "builtin", "user facing", "front", "facetime", "ir camera"]:
+		for termo in NOMES_DE_EMBUTIDA:
 			if str(termo) in nome:
 				nota -= 5000
 		if nota > melhor_nota:
@@ -199,10 +282,69 @@ func _indice_camera_usb(feeds: Array) -> int:
 			melhor = i
 	return melhor
 
+func _nome_do_feed(feed) -> String:
+	if feed == null or not feed.has_method("get_name"):
+		return ""
+	return str(feed.get_name()).strip_edges().to_lower()
+
+## Compara a lista de agora com a de antes. Uma câmera que NASCE é, num
+## notebook, a USB que alguém acabou de espetar — e é ela que o jogo
+## quer, mesmo que o nome dela não diga nada.
+func _notar_cameras_novas(feeds: Array) -> void:
+	var agora := PackedStringArray()
+	for feed in feeds:
+		agora.append(_nome_do_feed(feed))
+	if not _lista_comparavel:
+		# A primeira lista é o retrato de partida: no gabinete a câmera já
+		# está espetada quando o jogo abre, e nada ali é novidade.
+		_lista_comparavel = true
+		_cameras_conhecidas = agora
+		return
+	for nome in agora:
+		if not _cameras_conhecidas.has(nome) and not _recem_chegadas.has(nome):
+			_recem_chegadas.append(str(nome))
+	_cameras_conhecidas = agora
+
+## LIBERA O INTERRUPTOR DE PRIVACIDADE DA WEBCAM, UMA VEZ, SOZINHO.
+##
+## É uma das duas causas mais comuns de "não funciona nessa máquina", e a
+## única que o jogo pode resolver sem ninguém. Não é escondido nem
+## irreversível: é o mesmo valor que o aplicativo Configurações grava
+## quando alguém move o interruptor à mão, no ramo do USUÁRIO — não pede
+## administrador e não mexe na máquina inteira.
+##
+## Só acontece quando a extensão ESTÁ carregada e mesmo assim nenhuma
+## câmera aparece por alguns segundos. Com a extensão faltando, mexer na
+## privacidade não resolveria nada e só confundiria o diagnóstico.
+func _tentar_liberar_privacidade() -> void:
+	if _privacidade_liberada or OS.get_name() != "Windows":
+		return
+	if not extensao_nativa_presente():
+		return
+	var agora := Time.get_ticks_msec()
+	if _busca_comecou_ms == 0:
+		_busca_comecou_ms = agora
+		return
+	if agora - _busca_comecou_ms < ESPERA_ANTES_DE_LIBERAR_MS:
+		return
+	_privacidade_liberada = true
+	var antes := CameraDoctor.ler_registro(CameraDoctor.RAMO_USUARIO + "\\NonPackaged")
+	if antes.to_lower() == "allow":
+		# Já estava liberado: o problema é outro, e dizer isso poupa o
+		# operador de procurar no lugar errado.
+		return
+	CameraDoctor.liberar_privacidade()
+	status = "PRIVACIDADE DA CÂMERA LIBERADA — PROCURANDO DE NOVO"
+	_proxima_busca_ms = 0
+
 func _adotar_camera_usb_preferida() -> void:
 	if not enabled:
 		return
 	var feeds: Array = CameraServer.feeds()
+	# REPARAR NAS NOVAS ANTES DE ESCOLHER. É aqui que uma webcam USB
+	# espetada com o jogo já aberto substitui a embutida do notebook: sem
+	# esta linha a lista mudaria e a preferência continuaria a mesma.
+	_notar_cameras_novas(feeds)
 	var preferida := _indice_camera_usb(feeds)
 	if preferida < 0:
 		return
@@ -212,6 +354,15 @@ func _adotar_camera_usb_preferida() -> void:
 	selected_index = preferida
 	_abrir_feed_disponivel()
 
+## SEGUNDOS DE BUSCA ANTES DE MEXER NA PRIVACIDADE.
+##
+## Uma webcam USB recém-espetada leva um instante para o Windows montar,
+## e liberar o registro no primeiro quadro seria mexer numa coisa que
+## talvez nem fosse o problema. Depois de três segundos sem nenhuma
+## câmera, com a extensão carregada, a privacidade é o suspeito número
+## um — e é o único que o jogo pode resolver sozinho.
+const ESPERA_ANTES_DE_LIBERAR_MS := 3000
+
 func _abrir_feed_disponivel() -> void:
 	if not enabled or _feed != null:
 		return
@@ -220,7 +371,9 @@ func _abrir_feed_disponivel() -> void:
 		estado = Estado.SUBINDO
 		var motivo := _diagnostico_da_plataforma()
 		status = motivo if not motivo.is_empty() else "CONECTE UMA CÂMERA USB — BUSCANDO…"
+		_tentar_liberar_privacidade()
 		return
+	_notar_cameras_novas(feeds)
 	selected_index = _indice_camera_usb(feeds)
 	if selected_index < 0:
 		return

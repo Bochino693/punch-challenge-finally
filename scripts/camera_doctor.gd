@@ -142,9 +142,9 @@ func _trabalhar() -> void:
 		indices.append(i)
 
 	# 3) A privacidade.
-	var usuario := _ler_registro(RAMO_USUARIO)
-	privacidade = _ler_registro(RAMO_USUARIO + "\\NonPackaged")
-	var maquina := _ler_registro(RAMO_MAQUINA)
+	var usuario := ler_registro(RAMO_USUARIO)
+	privacidade = ler_registro(RAMO_USUARIO + "\\NonPackaged")
+	var maquina := ler_registro(RAMO_MAQUINA)
 	_dizer("Privacidade: usuário %s • programas %s • máquina %s" % [usuario, privacidade, maquina])
 
 	# 4) Quem mais pode estar com a câmera aberta.
@@ -164,7 +164,7 @@ func _trabalhar() -> void:
 ## Lê um valor do registro com `reg.exe`. A saída vem em colunas
 ## separadas por espaços; o valor é o último campo da linha que contém
 ## `Value`.
-func _ler_registro(caminho: String) -> String:
+static func ler_registro(caminho: String) -> String:
 	var saida: Array = []
 	var codigo := OS.execute("reg.exe", PackedStringArray(["query", caminho, "/v", "Value"]), saida, true)
 	if codigo != 0:
@@ -184,18 +184,37 @@ func _ler_registro(caminho: String) -> String:
 ## O ramo do usuário é exatamente o mesmo valor que o aplicativo
 ## Configurações grava quando alguém move o interruptor à mão — nada aqui
 ## é escondido nem irreversível.
-func _liberar_privacidade() -> void:
+## ESTÁTICA PORQUE NÃO É SÓ O DIAGNÓSTICO QUE PRECISA DISTO.
+##
+## O interruptor de privacidade fechado é uma das duas causas mais
+## comuns de "a câmera não funciona nessa máquina", e a correção não
+## pede administrador nenhum: é o mesmo valor que o aplicativo
+## Configurações grava quando alguém move o interruptor à mão. Esperar
+## que o operador descubra o F9, ache o botão e o aperte é perder a
+## máquina por um registro de dez bytes — então `CameraService` chama
+## isto sozinho quando nenhuma câmera aparece.
+##
+## Devolve as linhas do que aconteceu, para quem quiser mostrar.
+static func liberar_privacidade() -> PackedStringArray:
+	var recado := PackedStringArray()
+	if OS.get_name() != "Windows":
+		return recado
 	for caminho in [RAMO_USUARIO, RAMO_USUARIO + "\\NonPackaged"]:
-		var antes := _ler_registro(str(caminho))
+		var antes := ler_registro(str(caminho))
 		var saida: Array = []
 		var codigo := OS.execute("reg.exe", PackedStringArray(
 			["add", str(caminho), "/v", "Value", "/t", "REG_SZ", "/d", "Allow", "/f"]
 		), saida, true)
 		var ramo: String = str(caminho).get_slice("\\", str(caminho).get_slice_count("\\") - 1)
 		if codigo == 0:
-			_dizer("LIBEROU %s: %s → %s" % [ramo, antes, _ler_registro(str(caminho))])
+			recado.append("LIBEROU %s: %s → %s" % [ramo, antes, ler_registro(str(caminho))])
 		else:
-			_dizer("NÃO CONSEGUI LIBERAR %s (código %d)." % [ramo, codigo])
+			recado.append("NÃO CONSEGUI LIBERAR %s (código %d)." % [ramo, codigo])
+	return recado
+
+func _liberar_privacidade() -> void:
+	for linha in liberar_privacidade():
+		_dizer(str(linha))
 
 ## Quantas câmeras o WINDOWS enxerga, independentemente do jogo. É esta
 ## diferença — Windows vê, jogo não vê — que separa um problema de driver
