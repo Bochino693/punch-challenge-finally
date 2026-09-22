@@ -37,6 +37,7 @@ func _initialize() -> void:
 	_test_a_janela_tem_a_proporcao_do_buraco()
 	_test_as_barras_cabem_na_moldura()
 	_test_a_postura_parada_se_mexe()
+	_test_nenhum_pe_atravessa_a_lona()
 	_test_a_reacao_cresce_com_a_forca()
 	_test_o_dano_soma_e_nao_passa_de_um()
 	_test_cada_forca_tem_reacao_propria()
@@ -154,6 +155,46 @@ func _lutador() -> Lutador3D:
 func _correr(l: Lutador3D, quadros: int) -> void:
 	for i in range(quadros):
 		l.atualizar(1.0 / 60.0)
+
+## O PÉ NUNCA ENTRA NA LONA — em nenhuma reação, em nenhum instante.
+##
+## A QUEIXA: "no movimento o pé acaba descendo e cortando". E cortando é
+## a palavra exata, porque a lona fica NA FRENTE do desenho: um pé que
+## afunda não aparece afundado, aparece decepado. Eram duas fontes.
+##
+##   A RESPIRAÇÃO. Um seno em torno de zero puxava o corpo 2 cm abaixo
+##   do repouso durante metade de cada ciclo, o tempo todo, parado.
+##   O CAMBALEIO. O balanço lateral inclinava a figura 0,18 rad. Num
+##   desenho RÍGIDO de 71 cm de meia-base isso enterra um pé 12,7 cm.
+##
+## Este teste roda todas as reações, quadro a quadro, e cobra o pé mais
+## baixo depois de TODA a conta de movimento. É o teste que faltava: o
+## defeito não quebra nada, não dá aviso e some atrás do tapete.
+func _test_nenhum_pe_atravessa_a_lona() -> void:
+	var l := _lutador()
+	# Parado: só a respiração. Duas respirações inteiras.
+	for i in range(240):
+		l.atualizar(1.0 / 60.0)
+		_ok(l.pe_mais_baixo() >= -0.001,
+			"parado, o pé afundou %.3f m na lona" % l.pe_mais_baixo())
+	# E agora cada reação, do desdém ao cambaleio, do começo ao fim.
+	for forca in [0.05, 0.25, 0.45, 0.70, 0.95]:
+		l.preparar()
+		l.bater(forca)
+		var pior := 0.0
+		for i in range(150):
+			l.atualizar(1.0 / 60.0)
+			pior = minf(pior, l.pe_mais_baixo())
+		_ok(pior >= -0.001,
+			"na reação a um golpe de %.2f o pé afundou %.3f m na lona" % [forca, pior])
+	# O cambaleio é o caso que originou a queixa: confere também que ele
+	# ainda INCLINA — travar o pé não pode ter deixado o corpo rígido.
+	_ok(Lutador3D.giro_do_cambaleio() > 0.02,
+		"o cambaleio precisa continuar inclinando o corpo")
+	var levanta := 2.0 * Lutador3D.MEIA_BASE_DOS_PES * sin(Lutador3D.giro_do_cambaleio())
+	_perto(levanta, Lutador3D.PE_LEVANTA_NO_CAMBALEIO, 0.005,
+		"o pé de trás tem de levantar o que PE_LEVANTA_NO_CAMBALEIO promete")
+	l.free()
 
 ## A POSTURA PARADA TEM DE SE MEXER, E NÃO CONGELAR.
 ##

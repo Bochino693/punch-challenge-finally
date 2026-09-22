@@ -10,6 +10,38 @@ fazem sentido depois dela.
 
 ---
 
+## 0. O que a Central está dizendo, e o que cada frase significa
+
+A linha embaixo do seletor de porta conta o que a máquina está fazendo
+**agora**. A lâmpada ao lado dela tem cor própria, e a cor sai do estado
+real da ligação (`Main.fase_serial`), não do texto.
+
+| na tela | cor | o que está acontecendo |
+| --- | --- | --- |
+| `SEM CAMINHO ATÉ O ARDUINO` | vermelho | nem a extensão nativa nem a ponte subiram — é software, pule para a etapa 5 |
+| `PROCURANDO A PLACA…` / `CONECTANDO COMx (n de N, busca k)` | ciano, girando | varrendo a fila de portas |
+| `PORTA NOVA: COMx — ABRINDO AGORA` | ciano | **um cabo acabou de ser espetado** e o jogo foi direto nele |
+| `AGUARDANDO READY — COMx` | ciano, girando | a porta abriu e o jogo está com o ouvido nela |
+| `CONECTADO COMx` | ciano | a placa falou; o sensor ainda não confirmou |
+| `CALIBRANDO n%` | âmbar | o MPU está sendo calibrado — mantenha o alvo parado |
+| `CONECTADO COMx` + lâmpada verde | verde | placa e sensor prontos |
+| `A PLACA CAIU EM COMx — RECONECTANDO` | ciano | a porta caiu e a reconexão já está marcada |
+| `COMx SUMIU DA LISTA — O CABO SAIU?` | ciano | o Windows deixou de anunciar a porta |
+
+**Espetar o cabo com o jogo aberto funciona e é rápido.** Com a Central
+na tela, a lista de portas é relida a cada 0,6 s; a porta que nasce fura
+a fila e é aberta na hora, e quando a placa responde o seletor dá um
+anel verde e um toque curto. Se depois de dois ou três segundos nada
+mudou, o Windows não está enumerando a porta — é a etapa 1.
+
+> Até a Build 58 isto não acontecia. No caminho nativo a lista de portas
+> era pedida uma vez, no arranque, e nunca mais: o jogo não tinha como
+> saber de uma porta que nasceu depois, e só tropeçava nela quando a
+> varredura cega chegasse àquele nome. É por isso que a tela ficava
+> dizendo "DESCONECTADO" por dezenas de segundos com a placa já ligada.
+
+---
+
 ## 1. O Windows enumera a COM?
 
 Gerenciador de Dispositivos → **Portas (COM e LPT)**. Tem de aparecer um
