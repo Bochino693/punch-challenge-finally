@@ -25,6 +25,7 @@ if ($LASTEXITCODE -ne 0) { throw "Falha ao importar recursos no Godot" }
 $Tests = @(
     "tests/test_core.gd",
     "tests/test_arena.gd",
+    "tests/test_folha_lutador.gd",
     "tests/test_quadro_liso.gd",
     "tests/test_camera_viva.gd",
     "tests/test_dois_socos.gd",

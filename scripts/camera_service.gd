@@ -24,9 +24,17 @@ extends Node
 ##   1. COPIARAM SÓ O .EXE. O `.pck` e as bibliotecas nativas são arquivos
 ##      separados no pacote Windows. Copiar só o EXE deixa o jogo e a DLL
 ##      para trás; a unidade de distribuição é sempre o ZIP completo.
-##   2. FALTA O VC++ REDISTRIBUTABLE. A DLL é compilada com MSVC. Numa
-##      máquina sem o *Visual C++ 2015-2022 x64*, o `LoadLibrary` falha
-##      silenciosamente e o resultado é idêntico ao item 1.
+##   2. FALTA O MEDIA FOUNDATION. E **não** o Visual C++ Redistributable,
+##      que é o que estava escrito aqui e estava errado. Lendo a tabela de
+##      importações da DLL da câmera, ela só chama `MF.dll`, `MFPlat.dll`,
+##      `MFReadWrite.dll`, `ole32`, `advapi32`, `kernel32` e `shlwapi` —
+##      tudo do próprio Windows, nada de runtime da Microsoft. O que
+##      derruba esta DLL é o Windows não ter Media Foundation: as edições
+##      **N/KN** da Europa e o Windows Server sem o recurso de mídia
+##      instalado. Quem precisa de `VCRUNTIME140.dll` é a OUTRA extensão,
+##      a `gdserial` do Arduino — e `tools/exportar_windows.ps1` já leva
+##      esse arquivo ao lado do executável, o que dispensa instalar o
+##      redistributable na máquina de destino.
 ##   3. WINDOWS ARM64. A extensão só traz `x86_64`. Num notebook Snapdragon
 ##      a DLL não carrega.
 ##
