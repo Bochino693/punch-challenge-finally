@@ -116,11 +116,34 @@ teste: uma reação mais forte tem de durar mais e empurrar mais.
 
 ### Duas armadilhas que o render ensinou
 
-**O tamanho vem do `pixel_size`.** A folha não sabe de metros: são 426
-pixels de altura, e é `pixel_size` que decide se aquilo vira um lutador
-de 1,80 m ou um gigante que estoura o quadro. Estourou na primeira
-montagem, e é um erro que teste nenhum pega olhando só para o código —
-por isso `tests/test_arena.gd` confere a escala em metros.
+**O tamanho vem do `pixel_size`, e ele tem de sair de MEDIDA.** A folha
+não sabe de metros: são 426 pixels de altura, e é `pixel_size` que
+decide se aquilo vira um lutador de 1,80 m ou um gigante que estoura o
+quadro. Estourou duas vezes. Na segunda o erro estava escondido numa
+frase: "a figura ocupa cerca de 86% dos 426 px". Não ocupa — medindo o
+alfa da folha, a figura em pé vai da linha 2 (topo da cabeça) à linha
+418 (sola do pé da frente), 97,9% da célula. Com os 86% supostos o
+lutador saía com **2,03 m** onde se pediu 1,80, e a câmera foi afastada
+três vezes para compensar, cada vez com um parágrafo explicando o
+porquê.
+
+Agora a escala sai de `TOPO_DA_CABECA_PX` e `SOLA_DO_PE_PX`, que são
+medidas, e duas ferramentas guardam isso:
+
+| ferramenta | o que faz |
+| --- | --- |
+| `tools/medir_folha.gd` | mede qualquer folha e imprime as constantes prontas |
+| `tests/test_folha_lutador.gd` | reprova quando a folha do disco e as constantes discordam |
+
+**O pé da perna de trás vem cortado na folha.** Seis das nove poses
+encostam na borda de baixo da célula: o desenho termina no meio da
+canela. É defeito de **arte**, não de código — nenhuma conta inventa um
+pé que não foi desenhado. O que o código faz é pôr a sola do pé da
+FRENTE em `y = 0` (a lona), o que deixa a borda cortada terminando
+abaixo do tapete, onde o próprio tapete a esconde, e desenhar uma
+**sombra de contato** em cima dessa junta. A dívida está declarada por
+extenso em `POSES_COM_PE_CORTADO`, e o teste avisa quando ela puder
+encolher.
 
 **No nocaute a câmera AFASTA, não aproxima.** Um corpo em pé é alto e
 estreito; um corpo caído é baixo e largo, e o desenho do nocaute ocupa a
@@ -141,6 +164,23 @@ o jogo rodando, o quadro fica em 6,92 ms de mediana e 7,14 no pior caso
 Substitua a folha e o `lutador_sprite_frames.tres`, mantendo os nove
 nomes de pose da tabela acima. `Lutador3D.PAPEIS` é o mapa entre papel
 do jogo e desenho; `tests/test_arena.gd` falha se faltar qualquer um.
+
+Depois de trocar, **meça**:
+
+```
+godot --headless --path . --script tools/medir_folha.gd
+```
+
+Ele imprime, pose por pose, a caixa do desenho dentro da célula, diz
+quais encostam nas bordas e devolve `TOPO_DA_CABECA_PX` e
+`SOLA_DO_PE_PX` prontos para colar em `scripts/arena/lutador.gd`. A
+câmera não precisa de ajuste nenhum: ela se enquadra sozinha a partir
+desses números (`Arena3D._calcular_enquadramento`).
+
+E deixe as regiões do `.tres` com `filter_clip = true`. As nove poses se
+tocam dentro da folha — `nocaute` chega na última coluna e
+`recuperacao`, a vizinha, começa na primeira —, e sem isso o filtro
+linear cola meio texel do desenho ao lado no contorno de cada pose.
 
 
 ## Premiação e torcida

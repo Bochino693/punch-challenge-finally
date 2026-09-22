@@ -97,13 +97,37 @@ const RECUO := {
 
 ## ------------------------------------------------------------ o tamanho
 ##
-## A folha tem 426 px de altura por pose, e a figura ocupa cerca de 86%
-## disso. Para o lutador medir 1,80 m no ringue, o quadro inteiro precisa
-## medir 2,09 — e é dividindo isso pelos 426 px que sai o tamanho do
-## pixel no mundo.
-const ALTURA_DO_QUADRO := 2.09
+## ESTES NÚMEROS FORAM MEDIDOS NA FOLHA, E NÃO ESTIMADOS.
+##
+## A versão anterior dizia "a figura ocupa cerca de 86% dos 426 px" e
+## tirava daí um quadro de 2,09 m. Não ocupa: medindo o alfa da folha,
+## pose por pose, a figura em pé vai da linha 2 (topo da cabeça) à linha
+## 418 (sola do pé da frente) — 417 px, ou 97,9% do quadro. Com a conta
+## antiga o lutador saía com 2,03 m de altura em vez de 1,80, e era esse
+## excesso que estourava o enquadramento por cima e por baixo. A câmera
+## foi sendo afastada três vezes para compensar um erro de escala.
+##
+## Agora a escala sai da MEDIDA: `tools/medir_folha.gd` imprime estas
+## linhas para qualquer folha, e `tests/test_folha_lutador.gd` reprova a
+## build se a folha do disco deixar de bater com o que está declarado
+## aqui. Trocar a arte passa a ser medir de novo, não adivinhar.
 const ALTURA_DA_FOLHA := 426.0
-const PES_NO_QUADRO := 0.972
+## A linha mais alta com tinta nas poses em pé (`guarda`, `idle`).
+const TOPO_DA_CABECA_PX := 2.0
+## A linha da SOLA DO PÉ DA FRENTE nas poses em pé. É ela, e não a borda
+## de baixo do quadro, que encosta na lona: a borda de baixo está
+## ocupada pela perna de trás, que vem CORTADA na folha (ver
+## `POSES_COM_PE_CORTADO` no teste).
+const SOLA_DO_PE_PX := 418.0
+## Quanto o lutador mede no ringue, do topo da cabeça à sola.
+const ALTURA_DA_FIGURA := 1.80
+
+## O tamanho do pixel no mundo sai da figura medida, não do quadro
+## inteiro — é a única forma de o lutador medir de fato 1,80 m.
+const PIXEL_NO_MUNDO := ALTURA_DA_FIGURA / (SOLA_DO_PE_PX - TOPO_DA_CABECA_PX + 1.0)
+## O quadro inteiro (os 426 px) convertido para metros. Continua público
+## porque a câmera e os testes precisam dele.
+const ALTURA_DO_QUADRO := ALTURA_DA_FOLHA * PIXEL_NO_MUNDO
 
 var _figura: AnimatedSprite3D = null
 var _corpo: Node3D = null
@@ -159,12 +183,17 @@ func montar(_ignorado: Variant = null) -> void:
 	_figura.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 	_figura.alpha_scissor_threshold = 0.04
 	_figura.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-	_figura.pixel_size = ALTURA_DO_QUADRO / ALTURA_DA_FOLHA
-	# Os pés da figura não ficam na borda de baixo do quadro: há uma
-	# margem transparente. Subir o sprite por essa margem é o que põe a
-	# sola na lona em vez de dentro dela.
+	_figura.pixel_size = PIXEL_NO_MUNDO
+	# A SOLA DO PÉ DA FRENTE ENCOSTA EM y = 0, QUE É A LONA.
+	#
+	# O sprite é centrado, então o meio do quadro cai na linha 213. Subir
+	# o desenho pela distância entre essa linha e a da sola põe o pé no
+	# tapete — e deixa a perna de trás, que a folha traz cortada na borda
+	# de baixo, TERMINANDO ABAIXO DA LONA, onde o próprio tapete a
+	# esconde. É a única coisa que o código pode fazer por um desenho sem
+	# pé; o resto é arte.
 	_figura.position = Vector3(
-		0.0, ALTURA_DO_QUADRO * (PES_NO_QUADRO - 0.5), 0.0
+		0.0, PIXEL_NO_MUNDO * (SOLA_DO_PE_PX - ALTURA_DA_FOLHA * 0.5), 0.0
 	)
 	_corpo.add_child(_figura)
 	_descanso = _corpo.transform
@@ -420,6 +449,15 @@ func fundura_do_tombo() -> float:
 	if _corpo == null:
 		return 0.0
 	return clampf(-_corpo.position.y / 0.34, 0.0, 1.5)
+
+## ONDE O CORPO ESTÁ AGORA em relação ao lugar de descanso.
+##
+## A arena precisa disto para a SOMBRA DE CONTATO: ela tem de andar com
+## a respiração e com o recuo do golpe, senão o corpo desliza por cima
+## de uma mancha parada e a sombra denuncia que é um adesivo. Quem
+## pergunta é a arena; o lutador é quem sabe.
+func deslocamento() -> Vector3:
+	return _corpo.position if _corpo != null else Vector3.ZERO
 
 ## Qual desenho está na tela agora — o contrato que os testes conferem.
 func desenho_atual() -> String:

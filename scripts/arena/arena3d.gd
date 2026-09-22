@@ -33,6 +33,18 @@ extends SubViewport
 const TAMANHO_CHEIO := Vector2i(640, 717)
 const TAMANHO_MAGRO := Vector2i(448, 502)
 
+## O ENQUADRAMENTO DA CÂMERA, EM DUAS CONSTANTES (ver `_calcular_enquadramento`).
+##
+## Quanto da altura da janela o lutador EM PÉ ocupa. Em 0,79 sobram uns
+## 24 cm de tapete embaixo e 26 cm de ar em cima: o bastante para a lona
+## aparecer sob os pés e a corda de cima cruzar o quadro — que é o que
+## faz a imagem ler como ringue e não como recorte —, sem devolver o
+## rosto ao tamanho de moeda que a versão afastada tinha.
+const OCUPACAO_DO_LUTADOR := 0.79
+## Quanto a câmera fica ACIMA da mira, em metros. É o que dá a leve
+## inclinação de transmissão; zero deixaria a imagem chapada de frente.
+const CAMERA_ACIMA_DA_MIRA := 0.21
+
 ## Cores da arena. O salão é claro no 2D; aqui dentro é escuro de
 ## propósito — o quadro tem de ler como uma JANELA para outro lugar, e
 ## não como um pedaço da mesma parede.
@@ -55,6 +67,15 @@ var _torcida: MultiMeshInstance3D = null
 var _torcida_base: Array[Vector3] = []
 var _impacto_particulas: GPUParticles3D = null
 var _poeira_particulas: GPUParticles3D = null
+var _sombra: MeshInstance3D = null
+
+## O ENQUADRAMENTO CALCULADO NO ARRANQUE. Distância, altura da câmera e
+## altura da mira saem da figura medida (ver `_calcular_enquadramento`), e não de
+## três números escritos à mão que precisavam ser reajustados toda vez
+## que a arte mudava de tamanho.
+var _distancia := 0.0
+var _altura_da_camera := 0.0
+var _altura_da_mira := 0.0
 
 var _relogio := 0.0
 var _tremor := 0.0
@@ -100,9 +121,12 @@ func _montar_mundo() -> void:
 	camera.fov = 44.0
 	camera.near = 0.15
 	camera.far = 24.0
-	camera.position = Vector3(0.0, 1.32, 3.35)
 	_mundo.add_child(camera)
-	camera.look_at_from_position(camera.position, Vector3(0.0, 1.12, 0.0), Vector3.UP)
+	_calcular_enquadramento()
+	camera.position = Vector3(0.0, _altura_da_camera, _distancia)
+	camera.look_at_from_position(
+		camera.position, Vector3(0.0, _altura_da_mira, 0.0), Vector3.UP
+	)
 
 	# A LUZ PRINCIPAL vem de cima e da frente: é o refletor do ginásio, o
 	# mesmo que o fundo 2D já desenha caindo sobre o saco.
@@ -413,7 +437,61 @@ func instalar() -> bool:
 	lutador.name = "Lutador"
 	_mundo.add_child(lutador)
 	lutador.montar()
+	_montar_sombra_de_contato()
 	return true
+
+## A SOMBRA DE CONTATO: a mancha escura onde o pé encontra a lona.
+##
+## POR QUE ELA PRECISA EXISTIR. O lutador é um DESENHO PLANO em pé num
+## mundo 3D, e um plano não projeta sombra nenhuma (as luzes da arena
+## têm sombra desligada, e teriam de ficar assim: sombra de verdade num
+## cartaz sai como um risco). Sem nada embaixo, a figura não POUSA no
+## tapete — ela fica encostada nele, e o olho lê isso como recorte
+## colado mesmo sem saber dizer por quê. É o mesmo motivo pelo qual todo
+## jogo que põe sprite em cena 3D desenha uma mancha embaixo.
+##
+## E AQUI ELA FAZ UM SEGUNDO SERVIÇO. A folha traz a perna de trás
+## cortada na borda de baixo do quadro (o desenho não tem esse pé). O
+## corte fica abaixo da lona, escondido pelo próprio tapete, mas a junta
+## ainda é uma linha reta onde deveria haver um pé. A mancha cai
+## exatamente sobre essa junta e a apaga. Não substitui consertar a
+## arte — apenas impede que o defeito seja a primeira coisa que se vê.
+func _montar_sombra_de_contato() -> void:
+	var malha := PlaneMesh.new()
+	malha.size = Vector2(0.94, 0.50)
+	var tinta := StandardMaterial3D.new()
+	tinta.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	tinta.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	tinta.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# A mesma textura de queda suave das faíscas, com o brilho virando
+	# opacidade: no meio ela é opaca, na borda some. Um retângulo de cor
+	# chapada aqui seria um tapete dentro do tapete.
+	tinta.albedo_texture = _textura_de_faisca(64, 40, 1.9)
+	tinta.albedo_color = Color(0.02, 0.03, 0.06, 0.62)
+	_sombra = MeshInstance3D.new()
+	_sombra.name = "SombraDeContato"
+	_sombra.mesh = malha
+	_sombra.material_override = tinta
+	_sombra.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Dois centímetros acima da lona: o bastante para não brigar com o
+	# tapete pelo mesmo pixel de profundidade, pouco o bastante para não
+	# flutuar.
+	_sombra.position = Vector3(0.0, 0.022, 0.0)
+	_mundo.add_child(_sombra)
+
+## A MANCHA ACOMPANHA O CORPO. Ela anda com a respiração e com o recuo
+## do golpe; no tombo ela se espalha e clareia, porque um corpo deitado
+## toca o tapete com tudo e a sombra dele não é mais um ponto.
+func _sombra_de_contato() -> void:
+	if _sombra == null or lutador == null:
+		return
+	var desloc := lutador.deslocamento()
+	var caido := clampf(lutador.queda, 0.0, 1.0)
+	_sombra.position = Vector3(desloc.x, 0.022, desloc.z * 0.6)
+	_sombra.scale = Vector3(lerpf(1.0, 1.8, caido), 1.0, lerpf(1.0, 1.45, caido))
+	var tinta := _sombra.material_override as StandardMaterial3D
+	if tinta != null:
+		tinta.albedo_color.a = lerpf(0.62, 0.28, caido)
 
 ## O LUTADOR NÃO É MAIS PINTADO AQUI, e o bloco que fazia isso — cento e
 ## poucas linhas de sombreador de desenho, contorno por casca invertida e
@@ -494,6 +572,7 @@ func avancar(delta: float) -> void:
 	_publico = maxf(0.0, _publico - delta * 0.72)
 	if lutador != null:
 		lutador.atualizar(delta)
+	_sombra_de_contato()
 	_camera()
 	_luzes()
 	_piscar()
@@ -511,6 +590,42 @@ func _ajustar_tamanho() -> void:
 	_magra = magra
 	size = TAMANHO_MAGRO if magra else TAMANHO_CHEIO
 
+## ------------------------------------------------------- o enquadramento
+##
+## POR QUE ISTO É CONTA E NÃO MAIS TRÊS NÚMEROS À MÃO.
+##
+## O enquadramento já foi refeito quatro vezes — "afastou para caber",
+## "chegou perto porque o corpo ganhou relevo", "afastou de novo porque
+## a ilustração estourava". Cada vez que a arte mudava de tamanho,
+## alguém reajustava distância e mira no olho e escrevia um parágrafo
+## explicando. E a causa nunca esteve na câmera: estava na escala do
+## desenho, que dizia 1,80 m e entregava 2,03 (ver `lutador.gd`).
+##
+## Com a escala medida, o enquadramento vira uma conta de três linhas:
+## o lutador ocupa uma fração declarada da altura da janela, e a sobra
+## se reparte igualmente entre a lona embaixo e as cordas em cima. Trocar
+## a arte por outra de proporção diferente não pede reajuste nenhum.
+
+## Distância, altura da câmera e altura da mira para o lutador ocupar
+## `OCUPACAO_DO_LUTADOR` da janela com a sobra repartida em partes iguais.
+##
+## A conta do topo e da base é feita NO PLANO DO DESENHO (z = 0), que é
+## onde a figura está. Com a câmera inclinada de `t`, o raio de baixo sai
+## a `t + meia_abertura` da horizontal e o de cima a `meia_abertura - t`;
+## a altura em que cada um cruza z = 0 é `altura_da_camera ± distancia *
+## tan(ângulo)`. Invertendo a de baixo sai a altura da câmera que põe a
+## base da janela exatamente onde se quer.
+func _calcular_enquadramento() -> void:
+	var figura := Lutador3D.ALTURA_DA_FIGURA
+	var janela := figura / OCUPACAO_DO_LUTADOR
+	var meia := deg_to_rad(camera.fov) * 0.5
+	_distancia = janela / (2.0 * tan(meia))
+	# A sobra repartida: metade vira tapete embaixo, metade vira ar em cima.
+	var base := -(janela - figura) * 0.5
+	var inclinacao := atan(CAMERA_ACIMA_DA_MIRA / _distancia)
+	_altura_da_camera = base + _distancia * tan(inclinacao + meia)
+	_altura_da_mira = _altura_da_camera - CAMERA_ACIMA_DA_MIRA
+
 ## A CÂMERA TAMBÉM APANHA. Ela recua no impacto, treme junto e volta
 ## sozinha — é o que transforma "o boneco se mexeu" em "a pancada foi
 ## sentida daqui". Um passeio lento e contínuo, por baixo, mantém a
@@ -524,32 +639,17 @@ func _camera() -> void:
 		sacode = Vector3(
 			randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-0.4, 0.4)
 		) * _tremor * 0.055
-	# O ENQUADRAMENTO É UM POUCO MAIS FECHADO E UM POUCO MAIS ALTO.
-	#
-	# A câmera estava mostrando o lutador inteiro com folga em volta, e o
-	# rosto — que é a parte que dá personagem a um personagem — ficava do
-	# tamanho de uma moeda dentro de uma janela que já é pequena na tela.
-	# Chegando perto e subindo a mira para a altura do peito, o tronco e a
-	# cabeça ocupam o quadro, que é onde o soco acerta e onde a reação
-	# acontece. Os pés continuam no quadro para a queda do nocaute ter
-	# para onde cair.
-	# E CHEGOU MAIS PERTO DE NOVO, porque o lutador ganhou o que mostrar.
-	#
-	# Enquanto ele era liso, folga em volta não custava nada. Agora que
-	# peitoral, abdome, deltoide e panturrilha são relevo de verdade e o
-	# couro da luva tem estouro de luz, mostrar tudo isso a 2,7 m dentro
-	# de uma janela de 640 px é jogar fora o trabalho: a essa distância um
-	# músculo tem três pixels. Em 2,30 m a figura ocupa o quadro, e é aí
-	# que a diferença entre um desenho chapado e um corpo aparece.
-	# O ENQUADRAMENTO FOI REFEITO PARA A ILUSTRAÇÃO.
-	#
-	# A 2,30 m e com 44° de abertura, a janela mostra 1,86 m de altura — e
-	# o quadro do desenho tem 2,09. O lutador estourava por cima e por
-	# baixo, sem lona e sem cordas à vista. A 2,95 m a janela mostra
-	# 2,39 m: a figura ocupa três quartos da altura, sobra o tapete
-	# embaixo e a corda em cima, e é assim que um ringue se lê.
-	var pos := Vector3(passeio, 1.26 + sin(_relogio * 0.21) * 0.05, 2.95 - _empurrao * 0.30)
-	var mira := Vector3(0.0, 1.04 + _empurrao * 0.06, 0.0)
+	# O ENQUADRAMENTO VEM DE `_calcular_enquadramento`, e o que sobra aqui
+	# é só o que se MEXE: o passeio lateral, a respiração vertical e o
+	# empurrão do impacto. Distância e mira deixaram de ser número
+	# escrito à mão justamente porque foram reescritos à mão quatro
+	# vezes, sempre para compensar uma escala errada do desenho.
+	var pos := Vector3(
+		passeio,
+		_altura_da_camera + sin(_relogio * 0.21) * 0.05,
+		_distancia - _empurrao * 0.30
+	)
+	var mira := Vector3(0.0, _altura_da_mira + _empurrao * 0.06, 0.0)
 	# QUANDO ELE CAI, A CÂMERA VAI JUNTO. Ficar parada na altura do peito
 	# depois do nocaute deixaria a moldura com um ringue vazio e o corpo
 	# fora de quadro — que foi exatamente o que aconteceu na primeira
@@ -574,9 +674,18 @@ func _camera() -> void:
 		# contexto. Afastando e descendo até quase a altura da lona, o
 		# corpo aparece inteiro e a câmera parece estar no tapete, que é
 		# onde toda transmissão de boxe põe a dela.
+		#
+		# As duas alturas e a distância do nocaute são FRAÇÕES do
+		# enquadramento em pé, e não números soltos: se o lutador mudar
+		# de tamanho, a tomada da lona acompanha sozinha. Descer a
+		# câmera a pouco mais da metade da altura e afastar 7% é o que
+		# põe o olho quase no tapete com o corpo deitado inteiro dentro
+		# do quadro.
 		var t := ease(caido, 0.5)
-		pos = pos.lerp(Vector3(0.0, 0.68, 3.16), t)
-		mira = mira.lerp(Vector3(0.0, 0.60, 0.0), t)
+		pos = pos.lerp(
+			Vector3(0.0, _altura_da_camera * 0.54, _distancia * 1.07), t
+		)
+		mira = mira.lerp(Vector3(0.0, _altura_da_mira * 0.58, 0.0), t)
 	camera.position = pos + sacode
 	camera.look_at(mira, Vector3.UP)
 

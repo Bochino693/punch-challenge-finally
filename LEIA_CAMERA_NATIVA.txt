@@ -28,9 +28,14 @@ E ela se perde facil, por tres motivos, nesta ordem:
      PARECE bastar. Mas biblioteca nativa nao entra no .pck: o Godot a
      exporta como arquivo solto AO LADO do executavel. Copiar so o EXE
      deixa a DLL para tras e o jogo abre normal, sem camera e sem erro.
-  2. FALTA O VISUAL C++ 2015-2022 REDISTRIBUTABLE x64. A DLL e compilada
-     com MSVC; sem o redistributable o Windows nem carrega o arquivo, e
-     o sintoma e identico ao item 1.
+  2. O WINDOWS NAO TEM MEDIA FOUNDATION. (Aqui dizia "falta o Visual C++
+     Redistributable". Estava errado: a DLL da camera nao usa runtime da
+     Microsoft nenhum -- ela so chama MF.dll, MFPlat.dll, MFReadWrite.dll,
+     ole32, advapi32, kernel32 e shlwapi, tudo do proprio Windows.) O que
+     derruba esta DLL e o Windows vir SEM Media Foundation: edicoes N e KN
+     e Windows Server sem o recurso de midia. Quem precisa do VCRUNTIME140
+     e a outra extensao, a do Arduino -- e o script de exportacao ja leva
+     esse arquivo na pasta, dispensando o instalador do redistributable.
   3. WINDOWS ARM64 (Snapdragon). A extensao so traz x86_64.
 
 COMO CONFERIR EM DEZ SEGUNDOS
@@ -50,7 +55,8 @@ COMO LEVAR PARA OUTRO PC
      libcameraserver-extension.windows.dll   (camera)
      gdserial.dll                            (Arduino)
    Sem o primeiro nao ha camera; sem o segundo nao ha sensor.
-3b. Instale o Visual C++ 2015-2022 Redistributable x64 na maquina nova.
+3b. Nao e preciso instalar o Visual C++ Redistributable: exportando por
+    tools/exportar_windows.ps1, o vcruntime140.dll ja vai dentro da pasta.
 4. Conecte a camera e o Arduino antes de abrir o jogo.
 
 ARQUIVOS NATIVOS IMPORTANTES

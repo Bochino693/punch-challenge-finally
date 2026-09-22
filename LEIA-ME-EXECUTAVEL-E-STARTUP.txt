@@ -1,0 +1,89 @@
+PUNCH CHALLENGE - O EXECUTAVEL, AS DLLS E O STARTUP DO WINDOWS
+==============================================================
+
+A PERGUNTA DIRETA: DA PARA POR TUDO DENTRO DE UM .EXE SO?
+---------------------------------------------------------
+NAO. E nao e configuracao que falta marcar.
+
+O jogo depende de duas bibliotecas nativas (GDExtension):
+
+    libcameraserver-extension.windows.dll   a webcam (Media Foundation)
+    gdserial.dll                            o Arduino (porta serial)
+
+O Godot carrega GDExtension com LoadLibrary do Windows, que exige um
+ARQUIVO REAL NO DISCO. Um .dll dentro do .pck -- ou dentro do .exe, com
+o PCK embutido -- nao tem caminho de disco, entao nao carrega. E uma
+limitacao conhecida do motor, valida em todas as versoes 4.x ate hoje.
+
+O que piora o sintoma: o jogo NAO DA ERRO. Ele abre normalmente, sem
+camera e sem sensor. Por isso "copiaram so o EXE" e o defeito numero um
+deste projeto, e por isso a unidade de distribuicao e a PASTA.
+
+Marcar "Embed PCK" no preset nao ajuda: junta o .pck ao .exe, e as duas
+DLLs continuam do lado de fora. O preset segue com embed_pck=false de
+proposito -- o PCK separado tambem evita o erro "cabecalho do arquivo
+executavel corrompido" que ja apareceu aqui.
+
+
+ENTAO COMO FICA O STARTUP, SE PRECISA SER INSTANTANEO
+------------------------------------------------------
+Arquivo unico nao e o caminho para velocidade -- e o contrario dele. As
+duas formas de fingir um .exe unico sao:
+
+  auto-extraivel (IExpress, 7-Zip SFX): descompacta a pasta inteira em
+  disco A CADA BOOT, antes de o jogo abrir. Fica mais LENTO, gasta
+  disco, e e o padrao que antivirus mais marca como suspeito.
+
+  extrator embutido no proprio jogo: mesma coisa, feita por nos.
+
+O caminho certo e INSTALAR UMA VEZ e apontar o startup para la:
+
+    powershell -ExecutionPolicy Bypass -File tools/exportar_windows.ps1
+    cd build\windows
+    powershell -ExecutionPolicy Bypass -File instalar_startup.ps1
+
+Assim o gabinete liga e o jogo sobe direto do disco: nao extrai nada,
+nao copia nada, nao tem tela preta de descompactacao.
+
+
+O QUE CADA SCRIPT FAZ
+----------------------
+tools/exportar_windows.ps1
+  - acha o Godot sozinho (parametro, PUNCH_GODOT, PATH, pastas usuais);
+  - roda tools/conferir_exportacao.sh antes, se houver `sh` na maquina;
+  - exporta o preset Windows Desktop;
+  - poe cada DLL no caminho exato que o .gdextension declara;
+  - COPIA O VCRUNTIME140.DLL DO SISTEMA para dentro da pasta. Isso
+    dispensa instalar o Visual C++ Redistributable no PC de destino
+    (a Microsoft permite essa entrega app-local). Quem precisava dele
+    era a gdserial; a DLL da camera nao usa runtime nenhum;
+  - confere presenca E ARQUITETURA de cada binario. Um .dll de 32 bits
+    ou ARM64 passa em qualquer teste de "o arquivo esta la" e falha
+    exatamente como um arquivo ausente;
+  - recusa fechar o pacote se houver copia ~*.dll (editor aberto);
+  - escreve o inventario com SHA256 e fecha o ZIP.
+
+tools/instalar_startup.ps1
+  - confere as QUATRO pecas essenciais antes de qualquer coisa (exe,
+    pck e as duas DLLs) e diz exatamente qual faltou;
+  - copia para %LOCALAPPDATA%\PunchChallenge com robocopy /MIR, de modo
+    que uma atualizacao nao deixa DLL velha para tras;
+  - tira a marca "arquivo baixado da internet" das DLLs (Unblock-File),
+    que e outra causa de LoadLibrary recusar em silencio;
+  - registra uma TAREFA AGENDADA no logon, sem atraso e com reinicio
+    automatico em caso de queda. A chave Run e a alternativa quando a
+    maquina recusa o agendamento -- ela funciona, mas sofre o atraso de
+    logon do Windows e nao reabre o jogo se ele cair;
+  - -Desinstalar tira o registro; com -Apagar remove tambem a pasta.
+
+
+COMO SABER, EM DEZ SEGUNDOS, SE O PC DE DESTINO ESTA CERTO
+-----------------------------------------------------------
+No jogo, F9 > CAMERA E SOM, linha EXTENSAO NATIVA DA CAMERA:
+
+  CARREGADA ...... a DLL subiu. Se nao ha imagem, o problema e a webcam,
+                   a privacidade do Windows ou outro programa usando a
+                   camera. Use DIAGNOSTICAR.
+  NAO CARREGOU ... a DLL nao esta la, nao e x86_64, ou o Windows nao tem
+                   Media Foundation (edicoes N/KN e Windows Server sem o
+                   recurso de midia instalado).
