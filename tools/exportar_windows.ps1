@@ -95,6 +95,16 @@ $console = [System.IO.Path]::ChangeExtension($godotExe, $null) + ".console.exe"
 if (Test-Path -LiteralPath $console) {
     $godotExe = $console
     Write-Host "    (usando a variante de console)"
+} else {
+    # SEM A VARIANTE DE CONSOLE, O LOG DO GODOT PODE VIR VAZIO.
+    #
+    # O binario grafico do Windows nem sempre escreve numa saida
+    # redirecionada, e e dela que sai o diagnostico quando a exportacao
+    # falha. O ZIP oficial do Godot traz as duas; quem extrai so o .exe
+    # fica sem a que serve para linha de comando.
+    Aviso "nao achei o Godot_*.console.exe ao lado deste binario."
+    Aviso "Extraia o ZIP do Godot INTEIRO na mesma pasta: sem a variante de"
+    Aviso "console, o log da exportacao pode sair vazio e o diagnostico cego."
 }
 Write-Host "    $godotExe"
 
@@ -138,6 +148,12 @@ if ($sh -and (Test-Path -LiteralPath $conferidor)) {
 #
 # `Start-Process -Wait` espera qualquer subsistema, e `-PassThru` da
 # acesso ao codigo de saida de verdade.
+$logSaida = Join-Path $raiz "build\godot-export.out.log"
+$logErro  = Join-Path $raiz "build\godot-export.err.log"
+$exeFinal = Join-Path $saida "PunchChallenge.exe"
+$pckFinal = Join-Path $saida "PunchChallenge.pck"
+$presetArquivo = Join-Path $raiz "export_presets.cfg"
+
 function Invocar-Godot([string[]]$argumentos) {
     # Os argumentos vao aspeados um a um: o caminho do projeto quase
     # sempre tem espaco (`C:\Users\LAZER GAMES\...`) e o nome do preset
@@ -145,21 +161,151 @@ function Invocar-Godot([string[]]$argumentos) {
     # O TrimEnd e contra um caminho terminado em barra: "C:\pasta\" faria
     # a barra escapar a propria aspa e engolir o argumento seguinte.
     $aspeados = $argumentos | ForEach-Object { '"' + $_.TrimEnd('\') + '"' }
+    # A SAIDA VAI PARA ARQUIVO, e nao para a tela.
+    #
+    # Nao e so arrumacao: sem capturar, o unico registro do que o Godot
+    # disse eram duzentas linhas de "Armazenando Arquivo" rolando no
+    # console, e a UNICA linha que importava -- o erro -- se perdia no
+    # meio delas ou nem aparecia. Guardada, ela pode ser procurada.
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $logSaida) | Out-Null
     $p = Start-Process -FilePath $godotExe -ArgumentList $aspeados `
-        -NoNewWindow -Wait -PassThru
+        -NoNewWindow -Wait -PassThru `
+        -RedirectStandardOutput $logSaida -RedirectStandardError $logErro
     return $p.ExitCode
+}
+
+## O QUE O GODOT RECLAMOU. Devolve so as linhas que parecem erro.
+function Erros-Do-Godot() {
+    $tudo = @()
+    foreach ($arquivo in @($logSaida, $logErro)) {
+        if (Test-Path -LiteralPath $arquivo) {
+            $tudo += Get-Content -LiteralPath $arquivo -ErrorAction SilentlyContinue
+        }
+    }
+    return $tudo | Where-Object {
+        $_ -match "ERROR|ERRO|error:|Erro|falh|fail|not found|nao encontrad|n.o encontrad|rcedit|template|Cannot|Unable"
+    }
+}
+
+## A EXPORTACAO, COM OU SEM GRAVAR ICONE E VERSAO NO EXECUTAVEL.
+##
+## POR QUE ISTO PRECISA SER OPCIONAL. O preset tem
+## `application/modify_resources=true`, que manda o Godot gravar icone,
+## nome do produto e numero de versao DENTRO do .exe. Ele nao faz isso
+## sozinho: chama uma ferramenta externa, o **rcedit**, que precisa
+## estar apontada em Editor > Configuracoes do Editor > Export >
+## Windows. Numa instalacao nova do Godot ela NAO esta.
+##
+## E o modo de falhar e traicoeiro: o Godot exporta o .pck para o
+## destino, monta o .exe num arquivo temporario, tenta o rcedit, falha,
+## e NAO MOVE o temporario para o destino. Resultado: a pasta fica com
+## o .pck e sem o .exe, e o processo termina com codigo 0 -- "terminou
+## sem erro e nao produziu nada", que foi exatamente o que apareceu.
+##
+## Sem gravar os recursos, o executavel sai com o icone padrao do Godot
+## e funciona igual. Para um gabinete que abre em tela cheia no logon,
+## o icone do .exe nao e visto por ninguem.
+function Exportar([bool]$comRecursos) {
+    $original = $null
+    if (-not $comRecursos) {
+        $original = [System.IO.File]::ReadAllText($presetArquivo)
+        $texto = $original -replace 'application/modify_resources=true', 'application/modify_resources=false'
+        # WriteAllText do .NET grava UTF-8 SEM BOM. Um BOM aqui faria o
+        # Godot tropecar na primeira linha do proprio preset.
+        [System.IO.File]::WriteAllText($presetArquivo, $texto)
+    }
+    try {
+        return Invocar-Godot @("--headless", "--path", $raiz, "--export-release", $Preset)
+    } finally {
+        if ($null -ne $original) {
+            [System.IO.File]::WriteAllText($presetArquivo, $original)
+        }
+    }
+}
+
+## O ANTIVIRUS COMEU O EXECUTAVEL?
+##
+## E a outra causa classica de "o Godot disse que exportou e nao ha
+## .exe": o Defender apaga o arquivo no instante em que ele e escrito.
+## Binario de template de motor de jogo, recem-criado, sem assinatura --
+## e o retrato do que a heuristica marca.
+function Antivirus-Reclamou() {
+    try {
+        $achados = Get-MpThreatDetection -ErrorAction SilentlyContinue |
+            Where-Object { "$($_.Resources)" -match "PunchChallenge|punch-challenge" } |
+            Sort-Object InitialDetectionTime -Descending |
+            Select-Object -First 3
+        return $achados
+    } catch { return $null }
+}
+
+function Mostrar-Diagnostico() {
+    $erros = Erros-Do-Godot
+    if ($erros) {
+        Write-Host "    o Godot reclamou disto:" -ForegroundColor Yellow
+        foreach ($linha in ($erros | Select-Object -First 12)) { Write-Host "      $linha" }
+    } else {
+        Write-Host "    o Godot nao imprimiu erro nenhum (log em $logSaida)."
+    }
+    Write-Host "    o que existe na pasta agora:"
+    $existe = Get-ChildItem -Path $saida -Recurse -File -ErrorAction SilentlyContinue
+    if ($existe) {
+        foreach ($f in $existe) { Write-Host ("      {0,12:N0}  {1}" -f $f.Length, $f.Name) }
+    } else {
+        Write-Host "      (nada)"
+    }
+    $praga = Antivirus-Reclamou
+    if ($praga) {
+        Write-Host ""
+        Write-Host "    O ANTIVIRUS APAGOU O EXECUTAVEL:" -ForegroundColor Red
+        foreach ($d in $praga) { Write-Host "      $($d.ThreatID) em $($d.InitialDetectionTime)" }
+        Write-Host "    Libere a pasta (num PowerShell COMO ADMINISTRADOR):"
+        Write-Host "      Add-MpPreference -ExclusionPath '$raiz'"
+    }
 }
 
 Passo "exportando com o preset '$Preset'"
 if (Test-Path $saida) { Remove-Item -Recurse -Force $saida }
 New-Item -ItemType Directory -Force -Path $saida | Out-Null
-$codigo = Invocar-Godot @("--headless", "--path", $raiz, "--export-release", $Preset)
-if ($codigo -ne 0) {
-    throw "A exportacao do Godot falhou (codigo $codigo). Abra o project.godot no editor uma vez e confira os modelos de exportacao."
+$codigo = Exportar $true
+
+if (-not (Test-Path -LiteralPath $exeFinal)) {
+    Aviso "o Godot terminou (codigo $codigo) e nao escreveu PunchChallenge.exe."
+    Mostrar-Diagnostico
+    if (Test-Path -LiteralPath $pckFinal) {
+        # O .pck NO LUGAR e o .exe AUSENTE e a assinatura do rcedit: o
+        # Godot chegou a empacotar tudo e so tropecou na hora de gravar
+        # icone e versao no executavel.
+        Passo "tentando de novo SEM gravar icone e versao no .exe (dispensa o rcedit)"
+        $codigo = Exportar $false
+    }
 }
-if (-not (Test-Path -LiteralPath (Join-Path $saida "PunchChallenge.exe"))) {
-    throw "O Godot terminou sem erro mas nao escreveu PunchChallenge.exe. Confira Editor > Gerenciar modelos de exportacao."
+
+if (-not (Test-Path -LiteralPath $exeFinal)) {
+    Mostrar-Diagnostico
+    throw @"
+A exportacao nao produziu PunchChallenge.exe (codigo $codigo).
+
+As tres causas possiveis, na ordem em que valem ser conferidas:
+
+  1. MODELOS DE EXPORTACAO ausentes ou de outra versao. No Godot:
+     Editor > Gerenciar modelos de exportacao > Baixar e instalar.
+     Tem de ser exatamente 4.6.1-stable.
+  2. ANTIVIRUS apagando o .exe recem-criado. Veja o diagnostico acima;
+     se houver deteccao, libere a pasta com Add-MpPreference.
+  3. RCEDIT nao configurado -- esta tentativa ja tentou contornar
+     desligando application/modify_resources. Se ainda falhou, nao era
+     isso.
+
+O log completo do Godot esta em:
+  $logSaida
+  $logErro
+"@
 }
+if (-not (Test-Path -LiteralPath $pckFinal)) {
+    throw "O executavel saiu mas nao ha PunchChallenge.pck. O pacote estaria incompleto."
+}
+Write-Host "    exportou: $exeFinal"
 
 # ------------------------------------------------------- bibliotecas nativas
 # Nao depende do exportador adivinhar onde por as bibliotecas. Copia cada
