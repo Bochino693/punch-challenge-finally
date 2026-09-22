@@ -1352,6 +1352,18 @@ func _entrar_em_resultado(encerrar_rodada := false) -> void:
 func _rodada_terminou() -> bool:
 	return socos.size() >= SOCOS_POR_RODADA or rodada_encerrada_antecipadamente
 
+## "BOM" acompanha a classificação visual, sem repetir aqui o limite
+## numérico que já pertence ao ScoreTier.
+func _soco_foi_bom(soco: Dictionary) -> bool:
+	return str(ScoreTier.de(int(soco["pontos"]))["id"]) != "LEVE"
+
+func _dois_socos_bons() -> bool:
+	return (
+		socos.size() >= SOCOS_POR_RODADA
+		and _soco_foi_bom(socos[0])
+		and _soco_foi_bom(socos[1])
+	)
+
 ## A TABELA DE RECORDES ESTÁ NA TELA?
 ##
 ## Duas condições, e a segunda foi esquecida por muito tempo porque dois
@@ -1964,7 +1976,19 @@ func _disparar_veredito() -> void:
 	# explosão, mesmo som, só a palavra mudando. Era exatamente o que a
 	# pessoa que joga duas vezes seguidas percebe.
 	var nivel: Dictionary = classe["nivel"]
-	sons.play(str(nivel["som"]), 0.5)
+	var id_nivel := str(nivel["id"])
+	if id_nivel == "LEVE":
+		# Golpe fraco recebe a reação curta enviada pelo operador.
+		sons.play("not_supress", -2.0)
+	elif _dois_socos_bons():
+		# A fala longa é reservada à conquista completa: dois bons golpes.
+		sons.play("good_player", -2.0)
+	else:
+		sons.play(str(nivel["som"]), 0.5)
+		# O primeiro bom golpe merece resposta, mas não a mesma festa
+		# reservada a quem confirmou o desempenho no segundo.
+		if socos.size() == 1:
+			sons.play("win", -9.0)
 	# O veredito é a fala da máquina: a trilha desce por todo o tempo em
 	# que o nome do nível está sendo anunciado.
 	sons.duck(16.0, 3.0)

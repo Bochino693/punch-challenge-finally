@@ -30,6 +30,8 @@ const EXTRA := [
 	# na tela mas o ouvido continuava batendo num saco de areia.
 	"arena_corpo", "arena_queda", "arena_publico", "torcida_desdenho",
 	"torcida_recorde", "torcida_podio", "torcida_top10", "torcida_top20",
+	# Vozes especiais da rodada de dois golpes.
+	"not_supress", "good_player",
 ]
 const LOOPS := ["music", "charge", "score_loop"]
 const ROOT := "res://assets/audio/arcade/"
@@ -57,6 +59,7 @@ const BARRAMENTOS := {
 	"nivel_explosivo": "Impact", "nivel_nocaute": "Impact", "nivel_peso": "Impact",
 	"nivel_lendario": "Impact", "nivel_perfeito": "Impact",
 	"arena_corpo": "Impact", "arena_queda": "Impact", "arena_publico": "SFX",
+	"not_supress": "Impact", "good_player": "SFX",
 	"credit": "UI", "start": "UI", "start_negado": "UI", "menu": "UI",
 	"error": "UI", "count": "UI", "go": "UI", "tick": "UI",
 	"shutter": "UI", "armado": "UI", "round_bell": "UI",
