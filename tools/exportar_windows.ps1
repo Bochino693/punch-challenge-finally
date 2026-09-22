@@ -103,11 +103,51 @@ if ($sh -and (Test-Path -LiteralPath $conferidor)) {
 }
 
 # ---------------------------------------------------------------- exportar
+#
+# O GODOT NAO PODE SER CHAMADO COM `&`. AQUI ESTAVA O DEFEITO.
+#
+# `Godot_v4.6.1-stable_win64.exe` e um binario de SUBSISTEMA GRAFICO,
+# mesmo rodando com --headless. O PowerShell NAO ESPERA um programa de
+# GUI terminar quando ele e chamado com `&`: dispara e segue na hora.
+#
+# O resultado era exatamente o que se viu na tela: a linha seguinte
+# comparava `$LASTEXITCODE`, que ainda estava VAZIO (nenhum programa de
+# console havia rodado), `'' -ne 0` dava verdadeiro, e o script morria
+# com "A exportacao do Godot falhou (codigo )" -- sem numero nenhum
+# dentro do parenteses, que e a assinatura do defeito. Segundos depois o
+# Godot terminava de exportar e despejava o log DEPOIS da mensagem de
+# erro, no prompt ja devolvido.
+#
+# E o estrago nao era so o susto: como o script morria aqui, NADA do que
+# vem depois acontecia -- nem a copia das DLLs, nem o vcruntime, nem a
+# conferencia de arquitetura, nem o ZIP. A pasta ficava com o que o
+# Godot tivesse escrito e mais nada, que e a origem de "levei para o
+# outro PC e a camera nao funciona".
+#
+# `Start-Process -Wait` espera qualquer subsistema, e `-PassThru` da
+# acesso ao codigo de saida de verdade.
+function Invocar-Godot([string[]]$argumentos) {
+    # Os argumentos vao aspeados um a um: o caminho do projeto quase
+    # sempre tem espaco (`C:\Users\LAZER GAMES\...`) e o nome do preset
+    # tem espaco sempre ("Windows Desktop").
+    # O TrimEnd e contra um caminho terminado em barra: "C:\pasta\" faria
+    # a barra escapar a propria aspa e engolir o argumento seguinte.
+    $aspeados = $argumentos | ForEach-Object { '"' + $_.TrimEnd('\') + '"' }
+    $p = Start-Process -FilePath $godotExe -ArgumentList $aspeados `
+        -NoNewWindow -Wait -PassThru
+    return $p.ExitCode
+}
+
 Passo "exportando com o preset '$Preset'"
 if (Test-Path $saida) { Remove-Item -Recurse -Force $saida }
 New-Item -ItemType Directory -Force -Path $saida | Out-Null
-& $godotExe --headless --path $raiz --export-release $Preset
-if ($LASTEXITCODE -ne 0) { throw "A exportacao do Godot falhou (codigo $LASTEXITCODE)." }
+$codigo = Invocar-Godot @("--headless", "--path", $raiz, "--export-release", $Preset)
+if ($codigo -ne 0) {
+    throw "A exportacao do Godot falhou (codigo $codigo). Abra o project.godot no editor uma vez e confira os modelos de exportacao."
+}
+if (-not (Test-Path -LiteralPath (Join-Path $saida "PunchChallenge.exe"))) {
+    throw "O Godot terminou sem erro mas nao escreveu PunchChallenge.exe. Confira Editor > Gerenciar modelos de exportacao."
+}
 
 # ------------------------------------------------------- bibliotecas nativas
 # Nao depende do exportador adivinhar onde por as bibliotecas. Copia cada

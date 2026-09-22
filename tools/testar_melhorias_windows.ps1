@@ -18,9 +18,20 @@ if ([string]::IsNullOrWhiteSpace($Godot) -or -not (Test-Path $Godot)) {
     throw "Godot não encontrado. Informe: -Godot 'C:\caminho\Godot_v4.6.1-stable_win64.exe'"
 }
 
+# MESMO DEFEITO QUE O exportar_windows.ps1 TINHA: o binario do Godot e de
+# subsistema grafico, e `&` nao espera um programa de GUI terminar. O
+# `$LASTEXITCODE` ficava vazio e o script morria antes de o Godot sequer
+# comecar. `Start-Process -Wait -PassThru` espera e devolve o codigo.
+function Invocar-Godot([string[]]$argumentos) {
+    $aspeados = $argumentos | ForEach-Object { '"' + $_.TrimEnd('\') + '"' }
+    $p = Start-Process -FilePath $Godot -ArgumentList $aspeados -NoNewWindow -Wait -PassThru
+    return $p.ExitCode
+}
+
 Write-Host "Importando recursos no Godot..." -ForegroundColor Cyan
-& $Godot --headless --editor --path $ProjectRoot --quit
-if ($LASTEXITCODE -ne 0) { throw "Falha ao importar recursos no Godot" }
+if ((Invocar-Godot @("--headless", "--editor", "--path", $ProjectRoot, "--quit")) -ne 0) {
+    throw "Falha ao importar recursos no Godot"
+}
 
 $Tests = @(
     "tests/test_core.gd",
@@ -41,8 +52,7 @@ $Tests = @(
 
 foreach ($Test in $Tests) {
     Write-Host "TESTE $Test" -ForegroundColor Yellow
-    & $Godot --headless --path $ProjectRoot --script (Join-Path $ProjectRoot $Test)
-    if ($LASTEXITCODE -ne 0) {
+    if ((Invocar-Godot @("--headless", "--path", $ProjectRoot, "--script", (Join-Path $ProjectRoot $Test))) -ne 0) {
         throw "Teste falhou: $Test"
     }
 }
